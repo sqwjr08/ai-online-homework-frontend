@@ -1,17 +1,9 @@
-<script setup>
-import { RouterView } from 'vue-router'
-</script>
-
 <template>
-  <RouterView />
+<router-view />  <!-- Vue Router 会根据当前路由显示对应页面组件 -->
 </template>
 
-<style scoped>
-#app {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-align: center;
-  color: #2c3e50;
+<script >
+export default {
+  name: 'App'
 }
-</style>
+</script>
