@@ -11,6 +11,7 @@ const router = createRouter({
     { path: '/student/class', name: 'student-class', component: () => import('../views/MyClassPage.vue'), meta: { requiresAuth: true, roles: ['student'] } },
     { path: '/admin/users', name: 'users', component: () => import('../views/UsersPage.vue'), meta: { requiresAuth: true, roles: ['admin'] } },
     { path: '/teacher/classes', name: 'teacher-classes', component: () => import('../views/ClassesPage.vue'), meta: { requiresAuth: true, roles: ['teacher'] } },
+    { path: '/teacher/questions', name: 'teacher-questions', component: () => import('../views/QuestionsPage.vue'), meta: { requiresAuth: true, roles: ['teacher'] } },
     ...['teacher', 'student', 'admin'].map(role => ({
       path: `/${role}`, name: role, component: () => import('../views/RoleHome.vue'),
       meta: { requiresAuth: true, roles: [role] },

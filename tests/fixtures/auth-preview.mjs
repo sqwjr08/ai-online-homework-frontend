@@ -21,6 +21,9 @@ const groups = [
   { id: 'class-archived', name: '虚构归档班', code: 'OLD123', teacher_id: 'fixture-teacher', is_active: false, created_at: '2030-01-01T00:00:00Z' },
 ];
 for (const user of accounts) if (user.role === 'student') user.class_id = 'class-demo';
+const questions = Array.from({ length: 26 }, (_, i) => ({ id: `question-${i}`, prompt: `虚构题目${i + 1}：解释索引的用途。`,
+  reference_answer: '虚构参考答案：加速检索。', rubric: i % 2 ? '说明用途得分。' : null, max_score: 10, image_urls: [],
+  created_by: 'fixture-teacher', is_active: i !== 25, created_at: '2030-01-01T00:00:00Z', updated_at: '2030-01-01T00:00:00Z' }));
 const api = http.createServer((req, res) => {
   let body = '';
   req.on('data', chunk => { body += chunk; });
@@ -56,6 +59,31 @@ const api = http.createServer((req, res) => {
     }
     if (req.url === '/api/v1/auth/logout') return send(200, { message: 'Discard token' });
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/api/v1/questions')) {
+      if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
+      if (url.pathname === '/api/v1/questions' && req.method === 'GET') {
+        const q = url.searchParams, page = Number(q.get('page') || 1), page_size = Number(q.get('page_size') || 20);
+        const matched = questions.filter(item => item.created_by === actor.id && item.is_active === (q.get('is_active') !== 'false')
+          && item.prompt.toLowerCase().includes((q.get('q') || '').trim().toLowerCase()));
+        return send(200, { items: matched.slice((page - 1) * page_size, page * page_size), total: matched.length, page, page_size });
+      }
+      if (url.pathname === '/api/v1/questions' && req.method === 'POST') {
+        const data = JSON.parse(body);
+        if (typeof data.prompt !== 'string' || !data.prompt.trim() || [...data.prompt.trim()].length > 10000
+          || typeof data.reference_answer !== 'string' || !data.reference_answer.trim() || [...data.reference_answer.trim()].length > 20000
+          || typeof data.max_score !== 'number' || !Number.isFinite(data.max_score) || data.max_score <= 0
+          || (data.rubric != null && (typeof data.rubric !== 'string' || !data.rubric.trim() || [...data.rubric.trim()].length > 5000)))
+          return send(422, { detail: 'Invalid fixture question input' });
+        const question = { id: `question-${questions.length}`, prompt: data.prompt.trim(), reference_answer: data.reference_answer.trim(),
+          max_score: data.max_score, rubric: data.rubric?.trim() ?? null, image_urls: [], is_active: true, created_by: actor.id,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        questions.unshift(question); return send(201, question);
+      }
+      const question = questions.find(item => url.pathname === `/api/v1/questions/${item.id}`);
+      if (req.method === 'GET' && question) return question.created_by === actor.id ? send(200, question) : send(403, { detail: 'Forbidden' });
+      return send(404, { detail: 'Question fixture route not found' });
+    }
     if (url.pathname.startsWith('/api/v1/classes')) {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
       if (url.pathname === '/api/v1/classes/my' && req.method === 'GET' && actor.role === 'student')
