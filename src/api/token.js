@@ -18,5 +18,3 @@ export function createTokenStore() {
     },
   };
 }
-
-export const tokenStore = createTokenStore();

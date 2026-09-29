@@ -1,31 +1,23 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import MainPage from '../components/mainpage.vue'
-import LoginRegister from '../components/login&register.vue'
-
-const routes = [
-  {
-    path: '/',
-    component: MainPage
-  },
-  {
-    path: '/login',
-    component: LoginRegister
-  },
-  { 
-    path: '/admin/upload', component: () => import('../components/upload.vue'),
-    name: 'Upload' // 添加命名路由方便<router-link>使用
-  },
-  {
-    path: '/student', component: () => import('../components/studentpage.vue')
-  },
-  {
-    path: '/admin', component: () => import('../components/admin.vue')
-  },
-]
+import { createRouter, createWebHistory } from 'vue-router';
+import { session } from '../auth/session.js';
+import { authorizeRoute } from '../auth/guard.js';
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
-})
-
-export default router
+  routes: [
+    { path: '/', name: 'root', component: () => import('../views/StatusPage.vue') },
+    { path: '/login', name: 'login', component: () => import('../views/LoginPage.vue') },
+    ...['teacher', 'student', 'admin'].map(role => ({
+      path: `/${role}`, name: role, component: () => import('../views/RoleHome.vue'),
+      meta: { requiresAuth: true, roles: [role] },
+    })),
+    { path: '/forbidden', name: 'forbidden', component: () => import('../views/StatusPage.vue'), meta: { requiresAuth: true } },
+    { path: '/session-error', name: 'session-error', component: () => import('../views/StatusPage.vue') },
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/StatusPage.vue') },
+  ],
+});
+router.beforeEach(to => authorizeRoute(to, session));
+session.onExpired(() => {
+  if (router.currentRoute.value.meta.requiresAuth) router.replace({ name: 'login', query: { reason: 'expired' } });
+});
+export default router;

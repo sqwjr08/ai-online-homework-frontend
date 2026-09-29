@@ -1,8 +1,5 @@
-import { createApiClient } from './client.js';
-import { tokenStore } from './token.js';
+import { session } from '../auth/session.js';
 
 export { ApiError } from './errors.js';
-export { tokenStore } from './token.js';
-
-// Login, restoration and routing will be connected in node 16c.
-export default createApiClient({ tokenStore });
+// Login/restore/logout must go through session so memory and storage stay in sync.
+export default session.api;

@@ -1,6 +1,6 @@
 # 请求基础：16b
 
-更新日期：2026-09-29。请求层已完成独立验证，登录页面、角色守卫、登录恢复尚未接入（16c）。业务页面仍有旧接口，不代表平台主流程可用。
+更新日期：2026-09-29。16c已接入登录页面、角色守卫和会话恢复，见 [登录与会话说明](auth-session.md)。业务页面尚未开放，不代表平台主流程可用。
 
 ## 地址与本地开发
 
@@ -26,12 +26,11 @@ npm run dev
 ## 使用方式
 
 ```javascript
-import api, { tokenStore } from '../api/index.js';
+import api from '../api/index.js';
+import { session } from '../auth/session.js';
 
-// 16c接入时使用；只存后端返回的access_token，不保存密码。
-const result = await api.post('/auth/login', { username, password }, { skipAuth: true });
-tokenStore.set(result.access_token);
-const me = await api.get('/auth/me');
+// 登录必须由会话模块统一处理，取得令牌后还会核实/auth/me。
+await session.login(username, password);
 const page = await api.get('/questions', { params: { page: 1, page_size: 20, q: '索引' } });
 
 // 上传不手动指定Content-Type，交由浏览器生成multipart边界。
@@ -40,16 +39,16 @@ form.append('file', selectedFile);
 const image = await api.post('/uploads/images', form);
 
 // 退出时即使网络请求失败，也应清理本地会话。
-tokenStore.clear();
+await session.logout();
 ```
 
 这些是使用说明，不会自动登录、上传或请求后端。普通成功调用直接得到响应体（对象、数组或分页对象），不再读取 `res.code` 或额外的 `res.data`。201、202同样是HTTP成功；202或提交201不表示评分完成。
 
-`tokenStore` 仅为内存接口，刷新页面会丢失。16c决定并实现登录恢复、用户状态、退出清缓存及路由跳转；本节点不声称已经支持持久登录。
+底层token容器保持私有。16c使用sessionStorage保存令牌，刷新时通过/auth/me核实身份；不保存密码、用户资料或角色到浏览器存储。业务代码不要绕过session直接写令牌。
 
 受保护请求发送 `Authorization: Bearer ...`。登录、注册等公开接口应使用 `skipAuth: true`，避免登录失败清理另一会话。请求层覆盖调用方的旧Authorization，关闭跨域凭据选项，不依赖旧Cookie会话。
 
-401只清理发起请求时对应的当前会话；旧请求迟到返回401不清除较新的登录。403不会退出。需要接入导航和用户缓存清理时，在 `src/api/index.js` 的 `createApiClient` 传入 `onUnauthorized` 回调；默认请求层不弹窗、不跳路由。退出还需由16c负责清理用户资料、页面数据与可能新增的持久化记录。
+401只清理发起请求时对应的当前会话；旧请求迟到返回401不清除较新的登录。403不会退出。公共api实例由session创建，401同时清除令牌和用户资料；路由层监听失效并离开受保护页面。退出立即清理本地状态，受保护视图卸载；后续新增共享业务缓存也必须绑定账号并在退出时清理。
 
 ## 错误契约
 
@@ -73,4 +72,4 @@ tokenStore.clear();
 
 `npm run test:api` 使用Node内置测试工具，无新增依赖。6项请求层测试用Axios模拟适配器，2项代理测试包含本机随机端口的虚构HTTP服务和实际Vite代理；不访问8000上的开发后端、数据库或模型。临时服务在测试结束关闭。
 
-2026-09-29：8项通过，前端构建通过；没有运行真实API、浏览器页面或完整业务验收。旧页面仍使用旧路径和旧错误结构，后续逐节点迁移；共享请求层会拒绝旧完整URL，登录页原fetch尚未改造。
+2026-09-29：8项通过，前端构建通过。16c另有7项会话测试及隔离虚构服务浏览器检查。旧components文件保留但不再接入路由；当前登录使用公共客户端。尚未运行真实后端HTTP联调或完整作业业务验收。
