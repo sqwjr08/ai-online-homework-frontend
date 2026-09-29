@@ -1,7 +1,25 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import api from '../api/index.js';
 import { createUsersModel, roleLabels, validateAccount } from '../accounts/users.js';
+import { canManageAccount, createMaintenanceModel } from '../accounts/maintenance.js';
+const maintenance = createMaintenanceModel(api);
+const management = maintenance.state;
+const resetForm = reactive({ password: '', confirmation: '' });
+const actionPanel = ref(null);
+function clearReset() { resetForm.password = ''; resetForm.confirmation = ''; }
+async function openAction(user, action) {
+  if (state.creating || management.target) return;
+  clearReset();
+  if (maintenance.open(user, action)) { await nextTick(); actionPanel.value?.focus(); }
+}
+async function confirmAction() {
+  const result = maintenance.confirm(resetForm.password, resetForm.confirmation);
+  // Keep password only for local validation failures; clear as soon as a request starts.
+  if (management.busy) clearReset();
+  if (await result) await model.load(1);
+}
+function closeAction() { if (maintenance.close()) { clearReset(); void model.load(1); } }
 const model = createUsersModel(api);
 const state = model.state;
 const filters = reactive({ username: '', role: '', active: '' });
@@ -10,7 +28,7 @@ const pages = computed(() => Math.max(1, Math.ceil(state.total / state.pageSize)
 function search() { state.filters = { ...filters }; void model.load(1); }
 function reset() { Object.assign(filters, { username: '', role: '', active: '' }); search(); }
 async function submit() {
-  if (state.creating || state.uncertain) return;
+  if (state.creating || state.uncertain || management.target) return;
   state.success = '';
   state.createError = '';
   state.fieldErrors = validateAccount(form);
@@ -25,14 +43,32 @@ async function submit() {
 }
 async function check() { await model.checkUncertain(); Object.assign(filters, state.filters); }
 onMounted(() => model.load());
-onBeforeUnmount(() => { form.password = ''; model.dispose(); });
+onBeforeUnmount(() => { form.password = ''; clearReset(); model.dispose(); maintenance.dispose(); });
 </script>
 
 <template>
   <main class="workspace users-page">
     <RouterLink to="/admin">← 管理工作台</RouterLink>
     <h1>账号管理</h1>
-    <p class="muted">查询平台账号，创建教师或学生账号。启停用与重置密码暂未开放。</p>
+    <p class="muted">查询和创建教师或学生账号，管理启用状态与密码。管理员账号受保护。</p>
+    <p v-if="management.success" class="success" role="status">{{ management.success }}</p>
+    <section v-if="management.target" ref="actionPanel" tabindex="-1" class="maintenance-panel" aria-labelledby="action-title">
+      <h2 id="action-title">{{ management.action === 'password' ? '重置密码' : management.target.is_active ? '停用账号' : '启用账号' }}：{{ management.target.username }}</h2>
+      <p v-if="management.action === 'status'" class="muted">{{ management.target.is_active ? '停用后，该账号不能登录，旧登录令牌失效。' : '启用后可重新登录，但之前失效的登录令牌不会恢复。' }}重复设置相同状态不会再次撤销会话。请确认目标账号。</p>
+      <p v-else class="muted">重置后旧登录令牌失效，需要使用新密码重新登录；不会改变账号的启用状态。密码首尾空格会保留。</p>
+      <p v-if="management.error" class="error" role="alert">{{ management.error }}</p>
+      <form @submit.prevent="confirmAction" :aria-busy="management.busy">
+        <fieldset :disabled="management.busy || management.blocked">
+          <template v-if="management.action === 'password'">
+            <label for="reset-password">新密码</label><input id="reset-password" v-model="resetForm.password" type="password" autocomplete="new-password" required aria-describedby="reset-help" />
+            <p id="reset-help" class="field-help">4–128个字符，不能全部为空白。发送后清空，不保存到浏览器存储。</p>
+            <label for="confirm-password">再次输入新密码</label><input id="confirm-password" v-model="resetForm.confirmation" type="password" autocomplete="new-password" required />
+          </template>
+          <button class="primary action-confirm" type="submit">{{ management.busy ? '正在提交…' : management.action === 'password' ? '确认重置密码' : management.target.is_active ? '确认停用' : '确认启用' }}</button>
+        </fieldset>
+        <button type="button" :disabled="management.busy" @click="closeAction">{{ management.blocked ? '关闭并刷新列表' : '取消' }}</button>
+      </form>
+    </section>
     <div class="users-layout">
       <section class="users-list" aria-labelledby="users-title">
         <h2 id="users-title">账号列表</h2>
@@ -48,8 +84,11 @@ onBeforeUnmount(() => { form.password = ''; model.dispose(); });
         <template v-else>
           <p v-if="!state.items.length" role="status" class="empty-state">没有符合条件的账号。可以调整筛选条件后重试。</p>
           <div v-else class="table-scroll" tabindex="0" role="region" aria-label="账号列表，可横向滚动">
-            <table><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">状态</th></tr></thead>
-              <tbody><tr v-for="user in state.items" :key="user.id"><td class="user-name">{{ user.username }}</td><td>{{ roleLabels[user.role] || '未知角色' }}</td><td><span :class="['account-status', { inactive: !user.is_active }]">{{ user.is_active ? '启用' : '停用' }}</span></td></tr></tbody>
+            <table><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+              <tbody><tr v-for="user in state.items" :key="user.id"><td class="user-name">{{ user.username }}</td><td>{{ roleLabels[user.role] || '未知角色' }}</td><td><span :class="['account-status', { inactive: !user.is_active }]">{{ user.is_active ? '启用' : '停用' }}</span></td><td>
+                <div v-if="canManageAccount(user)" class="row-actions"><button :disabled="!!management.target || state.creating" :aria-label="`${user.is_active ? '停用' : '启用'} ${user.username}`" @click="openAction(user, 'status')">{{ user.is_active ? '停用' : '启用' }}</button><button :disabled="!!management.target || state.creating" :aria-label="`重置密码 ${user.username}`" @click="openAction(user, 'password')">重置密码</button></div>
+                <span v-else class="muted">受保护</span>
+              </td></tr></tbody>
             </table>
           </div>
         </template>
@@ -67,7 +106,7 @@ onBeforeUnmount(() => { form.password = ''; model.dispose(); });
         <p v-if="state.createError" class="error" role="alert">{{ state.createError }}</p>
         <button v-if="state.uncertain" type="button" :disabled="state.loading" @click="check">按用户名查询建号结果</button>
         <form @submit.prevent="submit" :aria-busy="state.creating">
-          <fieldset :disabled="state.creating || !!state.uncertain">
+          <fieldset :disabled="state.creating || !!state.uncertain || !!management.target">
             <label for="new-name">新账号用户名</label><input id="new-name" v-model="form.username" autocomplete="off" required aria-describedby="name-help name-error" :aria-invalid="!!state.fieldErrors.username" />
             <p id="name-help" class="field-help">3–50个字符，不含空白或控制字符。</p><p id="name-error" class="field-error" role="alert">{{ state.fieldErrors.username }}</p>
             <label for="new-password">初始密码</label><input id="new-password" v-model="form.password" type="password" autocomplete="new-password" required aria-describedby="password-help password-error" :aria-invalid="!!state.fieldErrors.password" />
@@ -101,6 +140,11 @@ th { font-size: 13px; color: #596d72; background: #f4f7f7; } th, td { padding: 1
 .pagination label { display: flex; align-items: center; gap: 8px; margin: 0; white-space: nowrap; }
 .pagination select { width: auto; padding: 6px; } .pagination button { padding: 7px 10px; }
 .empty-state { padding: 30px 0; color: #596d72; }
+.maintenance-panel { margin-top: 24px; padding: 24px; border: 1px solid #bdcfca; border-radius: 14px; background: white; overflow-wrap: anywhere; }
+.maintenance-panel input { max-width: 440px; display: block; }
+.action-confirm { margin: 20px 0 12px; }
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.row-actions button { padding: 6px 8px; font-size: 13px; }
 @media (max-width: 960px) { .users-layout { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .users-filters { grid-template-columns: 1fr 1fr; } .users-filters > div:first-child { grid-column: 1 / -1; } .users-list, .create-account { padding: 18px; } }
 </style>

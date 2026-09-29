@@ -1,12 +1,15 @@
 import { reactive } from 'vue';
 
 export const roleLabels = { admin: '管理员', teacher: '教师', student: '学生' };
+export function passwordError(password) {
+  return [...password].length < 4 || [...password].length > 128 || !password.trim()
+    ? '密码须为4–128个字符，不能全部为空白。' : '';
+}
 export function validateAccount({ username, password, role }) {
   const errors = {};
   if ([...username].length < 3 || [...username].length > 50 || /[\s\p{C}]/u.test(username))
     errors.username = '用户名须为3–50个字符，不能含空白或控制字符。';
-  if ([...password].length < 4 || [...password].length > 128 || !password.trim())
-    errors.password = '密码须为4–128个字符，不能全部为空白。';
+  if (passwordError(password)) errors.password = passwordError(password);
   if (!['teacher', 'student'].includes(role)) errors.role = '只能创建教师或学生账号。';
   return errors;
 }
