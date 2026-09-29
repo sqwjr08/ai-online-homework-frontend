@@ -16,6 +16,11 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const credentials = new Map(accounts.map(user => [user.id, { hash: hash('demo-pass'), version: 0 }]));
 const tokens = new Map();
 let nextToken = 0;
+const groups = [
+  { id: 'class-demo', name: '虚构一班', code: 'ABC123', teacher_id: 'fixture-teacher', is_active: true, created_at: '2030-01-01T00:00:00Z' },
+  { id: 'class-archived', name: '虚构归档班', code: 'OLD123', teacher_id: 'fixture-teacher', is_active: false, created_at: '2030-01-01T00:00:00Z' },
+];
+for (const user of accounts) if (user.role === 'student') user.class_id = 'class-demo';
 const api = http.createServer((req, res) => {
   let body = '';
   req.on('data', chunk => { body += chunk; });
@@ -40,6 +45,32 @@ const api = http.createServer((req, res) => {
     }
     if (req.url === '/api/v1/auth/logout') return send(200, { message: 'Discard token' });
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/api/v1/classes')) {
+      if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
+      if (url.pathname === '/api/v1/classes/my' && req.method === 'GET') {
+        return send(200, groups.filter(group => group.teacher_id === actor.id && (!url.searchParams.has('is_active') || group.is_active === (url.searchParams.get('is_active') === 'true'))));
+      }
+      if (url.pathname === '/api/v1/classes' && req.method === 'POST') {
+        const data = JSON.parse(body), name = data.name?.trim();
+        if (!name || [...name].length > 100) return send(422, { detail: 'Invalid class name' });
+        const group = { id: `class-${groups.length}`, name, code: `C${String(groups.length).padStart(5, '0')}`, teacher_id: actor.id, is_active: true, created_at: new Date().toISOString() };
+        groups.unshift(group); return send(201, group);
+      }
+      const match = url.pathname.match(/^\/api\/v1\/classes\/([^/]+)\/(members|archive)$/);
+      if (match) {
+        const group = groups.find(group => group.id === match[1]);
+        if (!group) return send(404, { detail: 'Class not found' });
+        if (group.teacher_id !== actor.id) return send(403, { detail: 'Forbidden' });
+        if (match[2] === 'archive' && req.method === 'POST') { group.is_active = false; return send(200, group); }
+        if (match[2] === 'members' && req.method === 'GET') {
+          const q = url.searchParams, page = Number(q.get('page') || 1), page_size = Number(q.get('page_size') || 20);
+          const items = accounts.filter(user => user.role === 'student' && user.class_id === group.id && (!q.has('is_active') || user.is_active === (q.get('is_active') === 'true')));
+          return send(200, { items: items.slice((page - 1) * page_size, page * page_size), page, page_size, total: items.length });
+        }
+      }
+      return send(404, { detail: 'Class fixture route not found' });
+    }
     if (url.pathname.startsWith('/api/v1/users')) {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
       if (actor.role !== 'admin') return send(403, { detail: 'Administrator required' });

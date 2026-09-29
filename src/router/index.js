@@ -8,6 +8,7 @@ const router = createRouter({
     { path: '/', name: 'root', component: () => import('../views/StatusPage.vue') },
     { path: '/login', name: 'login', component: () => import('../views/LoginPage.vue') },
     { path: '/admin/users', name: 'users', component: () => import('../views/UsersPage.vue'), meta: { requiresAuth: true, roles: ['admin'] } },
+    { path: '/teacher/classes', name: 'teacher-classes', component: () => import('../views/ClassesPage.vue'), meta: { requiresAuth: true, roles: ['teacher'] } },
     ...['teacher', 'student', 'admin'].map(role => ({
       path: `/${role}`, name: role, component: () => import('../views/RoleHome.vue'),
       meta: { requiresAuth: true, roles: [role] },
