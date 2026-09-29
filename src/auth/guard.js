@@ -7,7 +7,7 @@ export async function authorizeRoute(to, session) {
   const user = session.state.user;
   if (to.meta.requiresAuth && !user) return { name: 'login', query: { redirect: to.fullPath } };
   if (to.meta.roles && !to.meta.roles.includes(user?.role)) return { name: 'forbidden' };
-  if (to.name === 'root' || (to.name === 'login' && user)) return user ? roleHomes[user.role] : { name: 'login' };
+  if (to.name === 'root' || (['login', 'register'].includes(to.name) && user)) return user ? roleHomes[user.role] : { name: 'login' };
   return true;
 }
 

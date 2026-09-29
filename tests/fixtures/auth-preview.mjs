@@ -29,6 +29,17 @@ const api = http.createServer((req, res) => {
     if (mode === 'offline') return send(503, { detail: 'Fixture temporarily unavailable' });
     const issued = tokens.get(req.headers.authorization?.replace('Bearer ', ''));
     const actor = issued && accounts.find(user => user.id === issued.id && user.is_active && credentials.get(user.id)?.version === issued.version);
+    if (req.url === '/api/v1/auth/register' && req.method === 'POST') {
+      const data = JSON.parse(body);
+      if (Object.keys(data).some(key => !['username', 'password'].includes(key)) || typeof data.username !== 'string'
+        || [...data.username].length < 3 || [...data.username].length > 50 || /[\s\p{C}]/u.test(data.username)
+        || typeof data.password !== 'string' || [...data.password].length < 4 || [...data.password].length > 128 || !data.password.trim())
+        return send(422, { detail: 'Invalid student registration' });
+      if (accounts.some(user => user.username === data.username)) return send(409, { detail: 'Username already exists' });
+      const user = { id: `fictional-${accounts.length}`, username: data.username, role: 'student', is_active: true, class_id: null, created_at: new Date().toISOString() };
+      accounts.unshift(user); credentials.set(user.id, { hash: hash(data.password), version: 0 });
+      return send(201, user);
+    }
     if (req.url === '/api/v1/auth/login' && req.method === 'POST') {
       const data = JSON.parse(body);
       if (data.username === 'disabled_demo') return send(403, { detail: 'User is disabled' });
@@ -47,6 +58,17 @@ const api = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname.startsWith('/api/v1/classes')) {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (url.pathname === '/api/v1/classes/my' && req.method === 'GET' && actor.role === 'student')
+        return send(200, groups.filter(group => group.id === actor.class_id));
+      if (url.pathname === '/api/v1/classes/join' && req.method === 'POST') {
+        if (actor.role !== 'student') return send(403, { detail: 'Student required' });
+        const code = JSON.parse(body).code?.trim().toUpperCase();
+        if (!/^[A-Z0-9]{6}$/.test(code || '')) return send(422, { detail: 'Invalid class code' });
+        const group = groups.find(group => group.code === code && group.is_active);
+        if (!group) return send(404, { detail: 'Active class not found' });
+        if (actor.class_id && actor.class_id !== group.id) return send(409, { detail: 'Student already belongs to another class' });
+        actor.class_id = group.id; return send(200, group);
+      }
       if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
       if (url.pathname === '/api/v1/classes/my' && req.method === 'GET') {
         return send(200, groups.filter(group => group.teacher_id === actor.id && (!url.searchParams.has('is_active') || group.is_active === (url.searchParams.get('is_active') === 'true'))));

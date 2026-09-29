@@ -44,7 +44,7 @@ async function submit() {
         <p id="login-error" v-if="error" role="alert" class="error">{{ error }}</p>
         <button class="primary full" :disabled="busy" type="submit">{{ busy ? '正在核实身份…' : '登录' }}</button>
       </form>
-      <p class="login-help">忘记密码或没有账号？请联系教师或管理员。<br />学生自助注册暂未开放。</p>
+      <p class="login-help">没有学生账号？<RouterLink to="/register">注册学生账号 →</RouterLink><br />忘记密码或需要教师账号，请联系教师或管理员。</p>
     </section>
     <p class="login-foot">答案先保存，成绩由教师确认后公布。</p>
   </main>

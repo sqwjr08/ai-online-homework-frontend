@@ -93,7 +93,14 @@ export function createSession({ storage = null, adapter } = {}) {
     clear();
     return api.post('/auth/logout', undefined, { skipAuth: true, timeout: 3000 }).catch(() => {});
   }
-  return { state: readonly(state), api, login, restore, logout,
+  async function refreshUser() {
+    const attempt = generation;
+    const user = validateUser(await api.get('/auth/me'));
+    if (attempt !== generation || state.status !== 'authenticated') throw new ApiError('会话已变化。', { kind: 'cancelled' });
+    state.user = user;
+    return user;
+  }
+  return { state: readonly(state), api, login, restore, logout, refreshUser,
     onExpired(listener) { expiredListeners.add(listener); return () => expiredListeners.delete(listener); },
   };
 }
