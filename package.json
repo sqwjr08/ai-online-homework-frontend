@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:api": "node --test tests/api-client.test.js tests/dev-proxy.test.js",
-    "test:auth": "node --test tests/auth.test.js"
+    "test:auth": "node --test tests/auth.test.js",
+    "test:users": "node --test tests/users.test.js"
   },
   "dependencies": {
     "axios": "^1.9.0",
