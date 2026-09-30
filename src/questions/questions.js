@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 
 export function questionInput(form) {
   const errors = {}, body = { prompt: form.prompt.trim(), reference_answer: form.reference_answer.trim(),
-    max_score: Number(form.max_score), rubric: form.rubric.trim() || null, image_urls: [] };
+    max_score: Number(form.max_score), rubric: form.rubric.trim() || null, image_urls: [...(form.image_urls ?? [])] };
   if (!body.prompt || [...body.prompt].length > 10000) errors.prompt = '题干须为1–10000个字符。';
   if (!body.reference_answer || [...body.reference_answer].length > 20000) errors.reference_answer = '参考答案须为1–20000个字符。';
   if (!String(form.max_score).trim() || !Number.isFinite(body.max_score) || body.max_score <= 0) errors.max_score = '满分必须是大于零的有限数字。';

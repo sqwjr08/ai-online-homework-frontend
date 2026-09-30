@@ -1,17 +1,21 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import api from '../api/index.js';
+import QuestionImage from '../components/QuestionImage.vue';
+import QuestionImagesEditor from '../components/QuestionImagesEditor.vue';
 import { createQuestionMaintenance } from '../questions/maintenance.js';
 import { createQuestionsModel } from '../questions/questions.js';
 const model = createQuestionsModel(api), state = model.state;
 const maintenance = createQuestionMaintenance(api), edit = maintenance.state;
 const search = reactive({ q: '', active: true });
-const blank = () => ({ prompt: '', reference_answer: '', max_score: '', rubric: '' });
+const blank = () => ({ prompt: '', reference_answer: '', max_score: '', rubric: '', image_urls: [] });
 const form = reactive(blank()), detailPanel = ref(null), maintenancePanel = ref(null), refreshing = ref(false);
+const createUploading = ref(false), editUploading = ref(false);
 const pages = computed(() => Math.max(1, Math.ceil(state.total / state.pageSize)));
 function applySearch() { state.q = search.q; state.active = search.active; void model.load(1); }
 async function read(id) { const pending = model.read(id); await nextTick(); detailPanel.value?.focus(); await pending; }
 async function create() {
+  if (createUploading.value) return;
   if (await model.create({ ...form })) {
     Object.assign(form, blank()); Object.assign(search, { q: state.q, active: state.active });
     await nextTick(); detailPanel.value?.focus();
@@ -19,6 +23,7 @@ async function create() {
 }
 async function check() { await model.checkResult(form.prompt); Object.assign(search, { q: state.q, active: state.active }); }
 async function saveMaintenance() {
+  if (editUploading.value) return;
   const mode = edit.mode;
   const result = await maintenance.submit();
   if (!result) return;
@@ -68,15 +73,15 @@ onBeforeUnmount(() => { Object.assign(form, blank()); model.dispose(); maintenan
       <template v-else-if="state.detail">
         <p class="field-help">ID：{{ state.detail.id }} · {{ state.detail.is_active ? '启用' : '停用' }} · 满分 {{ state.detail.max_score }} 分</p>
         <h3>题干</h3><p class="question-text">{{ state.detail.prompt }}</p>
+        <QuestionImage v-for="(url, index) in state.detail.image_urls" :key="`${index}:${url}`" :url="url" :index="index" />
         <h3>参考答案</h3><p class="question-text">{{ state.detail.reference_answer }}</p>
         <h3>评分标准</h3><p class="question-text">{{ state.detail.rubric ?? '未填写评分标准' }}</p>
-        <p v-if="state.detail.image_urls?.length" class="notice">此题包含 {{ state.detail.image_urls.length }} 张图片；本节点仅展示文字，图片展示与上传将在18c接入，当前题面可能不完整。</p>
         <p class="field-help">启用不代表可编辑。被作业引用或锁定的题目不能修改或停用，请另建新题。停用后暂无恢复入口。</p>
-        <div v-if="state.detail.is_active" class="actions"><button :disabled="!!edit.target || state.creating || refreshing" @click="startMaintenance('edit')">编辑文字</button><button :disabled="!!edit.target || state.creating || refreshing" @click="startMaintenance('disable')">停用题目</button></div>
+        <div v-if="state.detail.is_active" class="actions"><button :disabled="!!edit.target || state.creating || refreshing || createUploading" @click="startMaintenance('edit')">编辑题目</button><button :disabled="!!edit.target || state.creating || refreshing || createUploading" @click="startMaintenance('disable')">停用题目</button></div>
       </template>
     </section>
     <section v-if="edit.target" ref="maintenancePanel" tabindex="-1" class="panel" aria-labelledby="question-maintenance-title">
-      <h2 id="question-maintenance-title">{{ edit.mode === 'edit' ? '编辑文字' : '确认停用' }}</h2>
+      <h2 id="question-maintenance-title">{{ edit.mode === 'edit' ? '编辑题目' : '确认停用' }}</h2>
       <p class="field-help">题目 ID：{{ edit.target }}。离开页面会丢失未保存输入。</p>
       <p v-if="edit.error" class="error" role="alert">{{ edit.error }}</p>
       <form @submit.prevent="saveMaintenance"><fieldset :disabled="edit.busy">
@@ -85,16 +90,17 @@ onBeforeUnmount(() => { Object.assign(form, blank()); model.dispose(); maintenan
           <label for="edit-answer">参考答案（1–20000字符）</label><textarea id="edit-answer" v-model="edit.form.reference_answer" rows="4" required /><p v-if="edit.errors.reference_answer" class="error" role="alert">{{ edit.errors.reference_answer }}</p>
           <label for="edit-rubric">评分标准（选填，最多5000字符；清空可移除）</label><textarea id="edit-rubric" v-model="edit.form.rubric" rows="4" /><p v-if="edit.errors.rubric" class="error" role="alert">{{ edit.errors.rubric }}</p>
           <label for="edit-score">满分（大于零）</label><input id="edit-score" v-model="edit.form.max_score" type="number" step="any" required /><p v-if="edit.errors.max_score" class="error" role="alert">{{ edit.errors.max_score }}</p>
-          <p class="field-help">只修改文字及满分，保留已有图片。多人同时修改文字可能互相覆盖，请避免同时编辑。</p>
+          <QuestionImagesEditor v-model="edit.form.image_urls" :disabled="edit.busy || edit.blocked" @uploading="editUploading = $event" />
+          <p class="field-help">未调整图片时保留已有引用。多人同时修改题目可能互相覆盖，请避免同时编辑。</p>
         </template>
         <template v-else><p class="question-text">{{ edit.form.prompt }}</p><p>停用后不能作为启用题选用，目前没有恢复入口。已引用或锁定的题目可能被服务器拒绝停用。</p><label><input v-model="edit.confirmed" type="checkbox" /> 我确认停用这道题目</label></template>
-        <div class="actions"><button type="submit" class="primary" :disabled="edit.blocked || (edit.mode === 'disable' && !edit.confirmed)">{{ edit.busy ? '正在处理…' : edit.mode === 'edit' ? '保存修改' : '确认停用' }}</button><button type="button" @click="maintenance.close">{{ edit.mode === 'edit' ? '放弃输入并关闭' : '取消停用' }}</button></div>
+        <div class="actions"><button type="submit" class="primary" :disabled="editUploading || edit.blocked || (edit.mode === 'disable' && !edit.confirmed)">{{ edit.busy ? '正在处理…' : edit.mode === 'edit' ? '保存修改' : '确认停用' }}</button><button type="button" @click="maintenance.close">{{ edit.mode === 'edit' ? '放弃输入并关闭' : '取消停用' }}</button></div>
       </fieldset></form>
       <button v-if="edit.blocked" :disabled="edit.busy" @click="maintenance.refresh">读取最新内容（保留输入）</button>
-      <div v-if="edit.latest"><h3>服务器最新内容</h3><p>{{ edit.latest.is_active ? '启用' : '已停用' }} · 满分 {{ edit.latest.max_score }} 分</p><h4>题干</h4><p class="question-text">{{ edit.latest.prompt }}</p><h4>参考答案</h4><p class="question-text">{{ edit.latest.reference_answer }}</p><h4>评分标准</h4><p class="question-text">{{ edit.latest.rubric ?? '未填写' }}</p><p v-if="!edit.latest.is_active">题目已停用，请关闭本次操作。</p><button v-else-if="edit.blocked" :disabled="edit.busy" @click="maintenance.acknowledge">已核对，允许手动再次操作</button></div>
+      <div v-if="edit.latest"><h3>服务器最新内容</h3><p>{{ edit.latest.is_active ? '启用' : '已停用' }} · 满分 {{ edit.latest.max_score }} 分</p><h4>题干</h4><p class="question-text">{{ edit.latest.prompt }}</p><h4>参考答案</h4><p class="question-text">{{ edit.latest.reference_answer }}</p><h4>评分标准</h4><p class="question-text">{{ edit.latest.rubric ?? '未填写' }}</p><QuestionImage v-for="(url, index) in edit.latest.image_urls" :key="`${index}:${url}`" :url="url" :index="index" /><p v-if="!edit.latest.is_active">题目已停用，请关闭本次操作。</p><button v-else-if="edit.blocked" :disabled="edit.busy" @click="maintenance.acknowledge">已核对，允许手动再次操作</button></div>
     </section>
     <section class="panel" aria-labelledby="question-create-title">
-      <fieldset :disabled="!!edit.target || refreshing"><h2 id="question-create-title">创建文字简答题</h2><p class="muted">填写题干、参考答案和满分；评分标准可不填。本节点不上传图片。</p>
+      <fieldset :disabled="!!edit.target || refreshing"><h2 id="question-create-title">创建简答题</h2><p class="muted">填写题干、参考答案和满分；评分标准可不填，可选上传题目图片。</p>
       <p v-if="state.createError" class="error" role="alert">{{ state.createError }}</p>
       <button v-if="state.uncertain" :disabled="state.loading" @click="check">按题干检索并核对结果</button>
       <form @submit.prevent="create" :aria-busy="state.creating"><fieldset :disabled="state.creating || state.uncertain">
@@ -102,8 +108,9 @@ onBeforeUnmount(() => { Object.assign(form, blank()); model.dispose(); maintenan
         <label for="question-answer">参考答案（1–20000字符）</label><textarea id="question-answer" v-model="form.reference_answer" rows="5" required :aria-invalid="!!state.errors.reference_answer" /><p v-if="state.errors.reference_answer" class="error" role="alert">{{ state.errors.reference_answer }}</p>
         <label for="question-score">满分</label><input id="question-score" v-model="form.max_score" type="number" step="any" required :aria-invalid="!!state.errors.max_score" /><p v-if="state.errors.max_score" class="error" role="alert">{{ state.errors.max_score }}</p>
         <label for="question-rubric">评分标准（选填，填写后最多5000字符）</label><textarea id="question-rubric" v-model="form.rubric" rows="4" :aria-invalid="!!state.errors.rubric" /><p v-if="state.errors.rubric" class="error" role="alert">{{ state.errors.rubric }}</p>
+        <QuestionImagesEditor v-model="form.image_urls" :disabled="state.creating || state.uncertain || !!edit.target || refreshing" @uploading="createUploading = $event" />
         <p class="field-help">文字去除首尾空白后校验长度。评分标准不填请留空，不要只填空格；满分必须大于零。</p>
-        <button type="submit" class="primary">{{ state.creating ? '正在保存…' : '保存题目' }}</button>
+        <button type="submit" class="primary" :disabled="createUploading">{{ state.creating ? '正在保存…' : '保存题目' }}</button>
       </fieldset></form>
     </fieldset></section>
   </main>

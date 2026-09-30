@@ -4,13 +4,14 @@ import { questionInput } from './questions.js';
 export function createQuestionMaintenance(api) {
   const state = reactive({ target: null, mode: '', form: {}, busy: false, blocked: false,
     latest: null, error: '', errors: {}, confirmed: false });
-  let disposed = false, generation = 0;
+  let disposed = false, generation = 0, originalImages = [];
   function begin(question, mode) {
     if (disposed || state.target || !question.is_active) return;
     generation++;
+    originalImages = [...(question.image_urls ?? [])];
     Object.assign(state, { target: question.id, mode, latest: null, error: '', errors: {}, blocked: false, confirmed: false,
       form: { prompt: question.prompt, reference_answer: question.reference_answer,
-        max_score: String(question.max_score), rubric: question.rubric ?? '' } });
+        max_score: String(question.max_score), rubric: question.rubric ?? '', image_urls: [...originalImages] } });
   }
   function close() {
     if (state.busy) return;
@@ -38,7 +39,8 @@ export function createQuestionMaintenance(api) {
   async function submit() {
     if (disposed || !state.target || state.busy || state.blocked || (state.mode === 'disable' && !state.confirmed)) return null;
     const { body, errors } = questionInput(state.form);
-    delete body.image_urls; // Text maintenance must never clear existing images.
+    // Omit unchanged images so text-only edits never overwrite image references.
+    if (JSON.stringify(body.image_urls) === JSON.stringify(originalImages)) delete body.image_urls;
     state.errors = state.mode === 'edit' ? errors : {};
     if (Object.keys(state.errors).length) return null;
     const version = generation;

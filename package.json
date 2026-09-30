@@ -12,7 +12,7 @@
     "test:users": "node --test tests/users.test.js tests/maintenance.test.js",
     "test:classes": "node --test tests/classes.test.js",
     "test:student": "node --test tests/student.test.js",
-    "test:questions": "node --test tests/questions.test.js tests/question-maintenance.test.js"
+    "test:questions": "node --test tests/questions.test.js tests/question-maintenance.test.js tests/question-images.test.js"
   },
   "dependencies": {
     "axios": "^1.9.0",

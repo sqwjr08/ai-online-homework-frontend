@@ -24,14 +24,36 @@ for (const user of accounts) if (user.role === 'student') user.class_id = 'class
 const questions = Array.from({ length: 26 }, (_, i) => ({ id: `question-${i}`, prompt: `虚构题目${i + 1}：解释索引的用途。`,
   reference_answer: '虚构参考答案：加速检索。', rubric: i % 2 ? '说明用途得分。' : null, max_score: 10, image_urls: [],
   created_by: 'fixture-teacher', is_active: i !== 25, created_at: '2030-01-01T00:00:00Z', updated_at: '2030-01-01T00:00:00Z' }));
+// In-memory image transport only; Pillow validation/re-encoding remains a backend check.
+const images = new Map();
 const api = http.createServer((req, res) => {
-  let body = '';
-  req.on('data', chunk => { body += chunk; });
+  const chunks = [];
+  req.on('data', chunk => { chunks.push(chunk); });
   req.on('end', () => {
+    const raw = Buffer.concat(chunks), body = raw.toString('utf8');
     const send = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     if (mode === 'offline') return send(503, { detail: 'Fixture temporarily unavailable' });
     const issued = tokens.get(req.headers.authorization?.replace('Bearer ', ''));
     const actor = issued && accounts.find(user => user.id === issued.id && user.is_active && credentials.get(user.id)?.version === issued.version);
+    if (req.method === 'GET' && images.has(req.url)) {
+      const image = images.get(req.url); res.writeHead(200, { 'Content-Type': image.type }); return res.end(image.bytes);
+    }
+    if (req.url === '/api/v1/uploads/images' && req.method === 'POST') {
+      if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (!['teacher', 'admin'].includes(actor.role)) return send(403, { detail: 'Teacher required' });
+      const boundary = /boundary=(?:"([^"]+)"|([^;\s]+))/.exec(req.headers['content-type'] ?? '');
+      if (!boundary) return send(422, { detail: 'Multipart file required' });
+      const headerEnd = raw.indexOf('\r\n\r\n'), header = raw.subarray(0, headerEnd).toString('utf8');
+      if (headerEnd < 0 || !header.includes('name="file"')) return send(422, { detail: 'File field required' });
+      const type = /Content-Type: (image\/(?:jpeg|png))\r?$/im.exec(header)?.[1];
+      if (!type) return send(415, { detail: 'Only JPEG and PNG' });
+      const end = raw.indexOf(Buffer.from(`\r\n--${boundary[1] ?? boundary[2]}`), headerEnd + 4);
+      if (end < 0) return send(400, { detail: 'Incomplete upload' });
+      const bytes = raw.subarray(headerEnd + 4, end);
+      if (!bytes.length || bytes.length > 5 * 1024 * 1024) return send(413, { detail: 'Image byte limit' });
+      const url = `/uploads/images/fixture-${images.size}.${type === 'image/png' ? 'png' : 'jpg'}`;
+      images.set(url, { type, bytes }); return send(200, { url });
+    }
     if (req.url === '/api/v1/auth/register' && req.method === 'POST') {
       const data = JSON.parse(body);
       if (Object.keys(data).some(key => !['username', 'password'].includes(key)) || typeof data.username !== 'string'
@@ -76,7 +98,7 @@ const api = http.createServer((req, res) => {
           || (data.rubric != null && (typeof data.rubric !== 'string' || !data.rubric.trim() || [...data.rubric.trim()].length > 5000)))
           return send(422, { detail: 'Invalid fixture question input' });
         const question = { id: `question-${questions.length}`, prompt: data.prompt.trim(), reference_answer: data.reference_answer.trim(),
-          max_score: data.max_score, rubric: data.rubric?.trim() ?? null, image_urls: [], is_active: true, created_by: actor.id,
+          max_score: data.max_score, rubric: data.rubric?.trim() ?? null, image_urls: data.image_urls ?? [], is_active: true, created_by: actor.id,
           created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
         questions.unshift(question); return send(201, question);
       }
@@ -99,6 +121,7 @@ const api = http.createServer((req, res) => {
             || (data.rubric != null && (typeof data.rubric !== 'string' || !data.rubric.trim() || [...data.rubric.trim()].length > 5000)))
             return send(422, { detail: 'Invalid fixture question input' });
           Object.assign(target, { prompt: data.prompt.trim(), reference_answer: data.reference_answer.trim(), max_score: data.max_score, rubric: data.rubric?.trim() ?? null });
+          if (Array.isArray(data.image_urls)) target.image_urls = [...data.image_urls];
         }
         target.updated_at = new Date().toISOString(); return send(200, target);
       }
