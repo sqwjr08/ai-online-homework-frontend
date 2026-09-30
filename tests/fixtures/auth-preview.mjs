@@ -30,11 +30,15 @@ const lockedQuestions = new Set(['question-0']);
 const assignments = [{ id: 'draft-0', title: '虚构草稿示例', description: null, class_id: 'class-demo',
   questions: [{ question_id: 'question-0' }], due_at: null, status: 'draft', created_by: 'fixture-teacher', created_at: '2030-01-01T00:00:00Z' }];
 function assignmentRead(item) {
-  return { ...item, view: 'teacher', question_source: 'draft_preview', questions: item.questions.map(({ question_id }, index) => {
+  const { snapshot, archived_from, ...common } = item;
+  return { ...common, view: 'teacher', question_source: snapshot ? 'snapshot' : item.status === 'draft' || archived_from === 'draft' ? 'draft_preview' : 'legacy_reference', questions: snapshot ?? item.questions.map(({ question_id }, index) => {
     const q = questions.find(q => q.id === question_id);
     return { question_id, position: index + 1, prompt: q.prompt, reference_answer: q.reference_answer, rubric: q.rubric, max_score: q.max_score, image_urls: q.image_urls };
   }) };
 }
+assignments.push({ ...assignments[0], id: 'published-0', title: '虚构已发布快照', status: 'published', snapshot: structuredClone(assignmentRead(assignments[0]).questions) },
+  { ...assignments[0], id: 'legacy-0', title: '虚构旧引用作业', status: 'published' },
+  { ...assignments[0], id: 'archived-0', title: '虚构已归档草稿', status: 'archived', archived_from: 'draft' });
 const api = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', chunk => { chunks.push(chunk); });
@@ -95,6 +99,22 @@ const api = http.createServer((req, res) => {
       if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
       const owns = item => groups.some(g => g.id === item.class_id && g.teacher_id === actor.id);
       if (url.pathname === '/api/v1/assignments/my' && req.method === 'GET') return send(200, assignments.filter(item => owns(item) && (!url.searchParams.has('status') || item.status === url.searchParams.get('status'))).map(assignmentRead));
+      const operation = /^\/api\/v1\/assignments\/([^/]+)\/(publish|archive)$/.exec(url.pathname);
+      if (operation && req.method === 'POST') {
+        const item = assignments.find(item => item.id === operation[1]);
+        if (!item) return send(404, { detail: 'Assignment not found' });
+        if (!owns(item)) return send(403, { detail: 'Forbidden' });
+        if (operation[2] === 'publish') {
+          if (!groups.find(g => g.id === item.class_id)?.is_active) return send(409, { detail: 'Class is archived' });
+          if (item.status === 'published') return send(200, assignmentRead(item));
+          if (item.status !== 'draft') return send(409, { detail: 'Only drafts can be published' });
+          if (item.due_at && new Date(item.due_at).getTime() <= Date.now()) return send(400, { detail: 'Assignment is closed' });
+          if (item.questions.some(row => !questions.find(q => q.id === row.question_id && q.is_active))) return send(400, { detail: 'Invalid questions' });
+          item.snapshot = structuredClone(assignmentRead(item).questions);
+          item.status = 'published';
+        } else if (item.status !== 'archived') { item.archived_from = item.status; item.status = 'archived'; }
+        return send(200, assignmentRead(item));
+      }
       const target = assignments.find(item => url.pathname === `/api/v1/assignments/${item.id}`);
       if (target && !owns(target)) return send(403, { detail: 'Forbidden' });
       if (target && req.method === 'GET') return send(200, assignmentRead(target));

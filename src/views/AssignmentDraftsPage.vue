@@ -4,36 +4,67 @@ import api from '../api/index.js';
 import { createDraftsModel } from '../assignments/drafts.js';
 import { createQuestionsModel } from '../questions/questions.js';
 import QuestionImage from '../components/QuestionImage.vue';
+import AssignmentReadOnly from '../components/AssignmentReadOnly.vue';
+import { createAssignmentLifecycle, canAct, statusName, sourceName } from '../assignments/lifecycle.js';
 const model = createDraftsModel(api), state = model.state;
 const picker = createQuestionsModel(api), questions = picker.state;
-const editorPanel = ref(null);
+const editorPanel = ref(null), actionPanel = ref(null);
+const lifecycle = createAssignmentLifecycle(api), action = lifecycle.state;
+const refreshing = ref(false);
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const pages = computed(() => Math.max(1, Math.ceil(questions.total / questions.pageSize)));
 const readonly = computed(() => state.busy || state.blocked || state.status !== 'draft');
 const className = id => state.groups.find(g => g.id === id)?.name ?? `班级 ID：${id}（可能已归档）`;
 const time = value => value ? new Date(value).toLocaleString() : '无截止时间';
 onMounted(() => { void model.load(); void model.loadGroups(); });
-onBeforeUnmount(() => { model.dispose(); picker.dispose(); });
+onBeforeUnmount(() => { model.dispose(); picker.dispose(); lifecycle.dispose(); });
 async function begin() { model.begin(); void picker.load(1); await nextTick(); editorPanel.value?.focus(); }
 async function open(id) { await model.open(id); if (state.form && state.status === 'draft') void picker.load(1); await nextTick(); editorPanel.value?.focus(); }
+async function preview(id, mode = 'view') {
+  if (state.form || state.reading || state.busy || refreshing.value) return;
+  state.success = '';
+  const pending = lifecycle.prepare(id, mode);
+  await nextTick(); actionPanel.value?.focus(); await pending;
+}
+async function applyAction() {
+  const record = await lifecycle.submit();
+  if (!record) return;
+  refreshing.value = true;
+  try { await model.load(); } finally { refreshing.value = false; }
+}
 </script>
 <template>
   <main class="workspace drafts-page">
-    <RouterLink to="/teacher">← 教师工作台</RouterLink><h1>作业草稿</h1>
-    <p>草稿对学生不可见。此处保存草稿，发布、归档及提交查看将在后续节点开放。</p>
+    <RouterLink to="/teacher">← 教师工作台</RouterLink><h1>班级作业</h1>
+    <p>草稿对学生不可见；发布后学生可查看并提交。提交查看和成绩确认将在后续节点开放。</p>
     <p v-if="state.success" class="notice" role="status">{{ state.success }}</p>
-    <section class="panel"><h2>已保存草稿</h2>
-      <div class="actions"><button :disabled="state.loading || state.busy" @click="model.load">刷新列表</button><button :disabled="!!state.form || state.reading" @click="begin">新建草稿</button></div>
-      <p v-if="state.loading" role="status">正在读取草稿…</p><p v-else-if="state.listError" class="error" role="alert">{{ state.listError }}</p>
-      <p v-else-if="!state.items.length">暂无草稿。</p>
-      <ul v-else><li v-for="item in state.items" :key="item.id"><strong>{{ item.title }}</strong><p>{{ className(item.class_id) }} · {{ item.questions.length }} 题 · {{ time(item.due_at) }}</p><p class="muted">ID：{{ item.id }}</p><button :disabled="!!state.form || state.reading || state.busy" @click="open(item.id)">打开草稿</button></li></ul>
-      <p class="muted">接口返回全部草稿，当前没有服务端分页或标题搜索。</p>
+    <section class="panel"><h2>作业列表</h2>
+      <label for="assignment-status">状态筛选</label><select id="assignment-status" v-model="state.filter" :disabled="state.busy || action.busy || refreshing" @change="model.load"><option value="draft">草稿</option><option value="published">已发布</option><option value="archived">已归档</option><option value="">全部</option></select>
+      <div class="actions"><button :disabled="state.loading || state.busy || action.busy || refreshing" @click="model.load">刷新列表</button><button :disabled="!!state.form || state.reading || !!action.id || refreshing" @click="begin">新建草稿</button></div>
+      <p v-if="state.loading" role="status">正在读取作业…</p><p v-else-if="state.listError" class="error" role="alert">{{ state.listError }}</p>
+      <p v-else-if="!state.items.length">没有符合条件的作业。</p>
+      <ul v-else><li v-for="item in state.items" :key="item.id"><strong>{{ item.title }}</strong> · {{ statusName(item.status) }}<p>{{ className(item.class_id) }} · {{ item.questions.length }} 题 · {{ time(item.due_at) }}</p><p class="muted">ID：{{ item.id }} · {{ sourceName(item.question_source) }}</p><div class="actions"><button :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id)">查看详情</button><button v-if="item.status === 'draft'" :disabled="!!state.form || state.reading || !!action.id || refreshing" @click="open(item.id)">编辑草稿</button><button v-if="item.status === 'draft'" :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id, 'publish')">发布前预览</button><button v-if="item.status !== 'archived'" :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id, 'archive')">归档</button></div></li></ul>
+      <p class="muted">接口返回所选状态的全部作业，当前没有服务端分页或标题搜索。</p>
     </section>
-    <p v-if="state.reading" role="status">正在读取最新草稿…</p><p v-if="state.error" class="error" role="alert">{{ state.error }}</p>
+    <section v-if="action.id" ref="actionPanel" tabindex="-1" class="panel">
+      <h2>{{ action.action === 'publish' ? '发布前预览' : action.action === 'archive' ? '归档确认' : '作业详情' }}</h2>
+      <p v-if="action.loading" role="status">正在读取服务器最新内容…</p><p v-if="action.error" class="error" role="alert">{{ action.error }}</p><p v-if="action.success" class="notice" role="status">{{ action.success }}</p>
+      <template v-if="action.record"><AssignmentReadOnly :assignment="action.record" :class-label="className(action.record.class_id)" />
+        <p v-if="action.record.status === 'published'" class="notice">已发布作业只读，不能修改题目、延期或撤回发布。</p>
+        <p v-if="action.record.status === 'archived'" class="notice">已归档作业只读，目前没有恢复或重新发布入口。内容来源按上方实际标记显示。</p>
+        <template v-if="action.action === 'publish'"><p>发布的是服务器已保存的草稿；发布时生成题目快照。发布后本班学生可见，内容与截止时间固定。请核对班级、题目顺序、图片和截止时间。</p><p>截止时间必须在服务器检查时仍未到达；不设截止时间不会因到期而关闭提交，请确认这一安排。归档班级不能发布。</p><p class="muted">预览后内容仍可能被其他操作更新，请避免同时编辑同一作业；发布结果以服务器返回为准。</p></template>
+        <p v-if="action.action === 'archive'">归档后学生不能再打开该作业题面或新提交；已有提交与成绩记录保留，本人历史提交与已确认成绩仍按后端权限访问。图片公开地址不会失效。此操作没有恢复入口；班级已归档也可归档其作业。</p>
+        <p v-if="action.action !== 'view' && !canAct(action.record, action.action)" class="notice">最新作业状态不支持本次操作，请核对上方状态，无需重复提交。</p>
+        <template v-if="canAct(action.record, action.action)"><label><input v-model="action.confirmed" type="checkbox" :disabled="action.busy || action.blocked" /> 我已核对上述内容，确认{{ action.action === 'publish' ? '发布' : '归档' }}此作业</label><button class="primary" :disabled="!action.confirmed || action.busy || action.blocked || refreshing" @click="applyAction">{{ action.busy ? '正在处理…' : action.action === 'publish' ? '确认发布' : '确认归档' }}</button></template>
+      </template>
+      <div class="actions"><button :disabled="action.loading || action.busy || refreshing" @click="preview(action.id, action.action)">重新读取最新内容并核对</button><button :disabled="action.busy || refreshing" @click="lifecycle.close">关闭详情与操作</button></div>
+    </section>
+    <p v-if="state.reading" role="status">正在读取最新作业…</p><p v-if="state.error" class="error" role="alert">{{ state.error }}</p>
     <section v-if="state.form" ref="editorPanel" tabindex="-1" class="panel"><h2>{{ state.id ? '编辑草稿' : '新建草稿' }}</h2>
+      <p v-if="state.id" class="muted">状态：{{ statusName(state.status) }} · 内容来源：{{ sourceName(state.source) }}</p>
       <p v-if="state.status !== 'draft'" class="notice">当前作业已不是草稿（{{ state.status }}），仅供查看，不能编辑或延期。</p>
       <p>保存草稿即永久锁定所选题目的内容与停用操作，移除引用也不会解锁；保存失败也可能留下题目锁。请先在题库确认题目。</p>
-      <p class="muted">离开或关闭本表单会丢失未保存输入。编辑已保存草稿时不能更换班级。</p>
+      <p class="muted">离开或关闭本表单会丢失未保存输入。编辑已保存草稿时不能更换班级。发布或归档前请先保存所需修改，再关闭本表单，从列表操作。</p>
       <form @submit.prevent="model.save"><fieldset :disabled="readonly">
         <label for="draft-title">标题（1–200字符）</label><input id="draft-title" v-model="state.form.title" required /><p v-if="state.errors.title" class="error">{{ state.errors.title }}</p>
         <label for="draft-description">说明（选填）</label><textarea id="draft-description" v-model="state.form.description" rows="3" />

@@ -36,8 +36,8 @@ function formFrom(data) {
 }
 
 export function createDraftsModel(api) {
-  const state = reactive({ items: [], groups: [], loading: false, listError: '', groupsLoading: false, groupsError: '',
-    form: null, id: null, status: 'draft', reading: false, busy: false, error: '', errors: {}, success: '',
+  const state = reactive({ items: [], filter: 'draft', groups: [], loading: false, listError: '', groupsLoading: false, groupsError: '',
+    form: null, id: null, status: 'draft', source: null, reading: false, busy: false, error: '', errors: {}, success: '',
     blocked: false, latest: null, checked: false, lockAcknowledged: false });
   let disposed = false, editorVersion = 0;
   const versions = {}, controllers = {};
@@ -54,12 +54,12 @@ export function createDraftsModel(api) {
     } catch (error) { if (!disposed && version === versions[key]) state[errorKey] = error.message; return false; }
     finally { if (!disposed && version === versions[key]) state[flag] = false; }
   }
-  const load = () => loadResource('list', '/assignments/my', { status: 'draft' });
+  const load = () => loadResource('list', '/assignments/my', state.filter ? { status: state.filter } : {});
   const loadGroups = () => loadResource('groups', '/classes/my', { is_active: true });
   function close() {
     if (state.busy || state.reading) return;
     editorVersion++; controllers.detail?.abort();
-    Object.assign(state, { form: null, id: null, error: '', errors: {}, blocked: false, latest: null, checked: false, lockAcknowledged: false });
+    Object.assign(state, { form: null, id: null, source: null, error: '', errors: {}, blocked: false, latest: null, checked: false, lockAcknowledged: false });
   }
   function begin() {
     if (disposed || state.form || state.reading) return;
@@ -73,7 +73,7 @@ export function createDraftsModel(api) {
     try {
       const data = await api.get(`/assignments/${id}`, { signal: controllers.detail.signal });
       if (disposed || version !== editorVersion) return;
-      state.id = data.id; state.status = data.status;
+      state.id = data.id; state.status = data.status; state.source = data.question_source;
       state.form = formFrom(data);
     } catch (error) { if (!disposed && version === editorVersion) state.error = error.message; }
     finally { if (!disposed && version === editorVersion) state.reading = false; }
@@ -101,10 +101,11 @@ export function createDraftsModel(api) {
     try {
       const result = state.id ? await api.patch(`/assignments/${state.id}`, body) : await api.post('/assignments', body);
       if (disposed || version !== editorVersion) return false;
-      state.id = result.id; state.status = result.status;
+      state.id = result.id; state.status = result.status; state.source = result.question_source;
       state.form = formFrom(result);
       state.success = `草稿已保存（ID：${result.id}），尚未发布，学生不可见。`;
       state.lockAcknowledged = false;
+      state.filter = 'draft';
       await load(); return !disposed;
     } catch (error) {
       if (disposed || version !== editorVersion) return false;
@@ -124,7 +125,7 @@ export function createDraftsModel(api) {
         const latest = await api.get(`/assignments/${state.id}`);
         if (disposed || version !== editorVersion) return;
         state.latest = latest; state.checked = true;
-      } else state.checked = await load();
+      } else { state.filter = 'draft'; state.checked = await load(); }
       if (!disposed && version === editorVersion && state.checked) state.error = '已读取最新结果，原输入保留。请核对内容及状态；同标题不代表同一作业，旧请求仍可能延迟完成。';
     } catch (error) { if (!disposed && version === editorVersion) state.error = error.message; }
     finally { if (!disposed && version === editorVersion) state.busy = false; }
