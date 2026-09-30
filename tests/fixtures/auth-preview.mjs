@@ -26,6 +26,15 @@ const questions = Array.from({ length: 26 }, (_, i) => ({ id: `question-${i}`, p
   created_by: 'fixture-teacher', is_active: i !== 25, created_at: '2030-01-01T00:00:00Z', updated_at: '2030-01-01T00:00:00Z' }));
 // In-memory image transport only; Pillow validation/re-encoding remains a backend check.
 const images = new Map();
+const lockedQuestions = new Set(['question-0']);
+const assignments = [{ id: 'draft-0', title: '虚构草稿示例', description: null, class_id: 'class-demo',
+  questions: [{ question_id: 'question-0' }], due_at: null, status: 'draft', created_by: 'fixture-teacher', created_at: '2030-01-01T00:00:00Z' }];
+function assignmentRead(item) {
+  return { ...item, view: 'teacher', question_source: 'draft_preview', questions: item.questions.map(({ question_id }, index) => {
+    const q = questions.find(q => q.id === question_id);
+    return { question_id, position: index + 1, prompt: q.prompt, reference_answer: q.reference_answer, rubric: q.rubric, max_score: q.max_score, image_urls: q.image_urls };
+  }) };
+}
 const api = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', chunk => { chunks.push(chunk); });
@@ -81,6 +90,37 @@ const api = http.createServer((req, res) => {
     }
     if (req.url === '/api/v1/auth/logout') return send(200, { message: 'Discard token' });
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/api/v1/assignments')) {
+      if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
+      const owns = item => groups.some(g => g.id === item.class_id && g.teacher_id === actor.id);
+      if (url.pathname === '/api/v1/assignments/my' && req.method === 'GET') return send(200, assignments.filter(item => owns(item) && (!url.searchParams.has('status') || item.status === url.searchParams.get('status'))).map(assignmentRead));
+      const target = assignments.find(item => url.pathname === `/api/v1/assignments/${item.id}`);
+      if (target && !owns(target)) return send(403, { detail: 'Forbidden' });
+      if (target && req.method === 'GET') return send(200, assignmentRead(target));
+      const creating = url.pathname === '/api/v1/assignments' && req.method === 'POST';
+      if (creating || (target && req.method === 'PATCH')) {
+        const data = JSON.parse(body), classId = creating ? data.class_id : target.class_id;
+        const group = groups.find(g => g.id === classId && g.is_active);
+        if (!group) return send(creating ? 404 : 409, { detail: 'Class unavailable or archived' });
+        if (group.teacher_id !== actor.id) return send(403, { detail: 'Class ownership required' });
+        if (!creating && target.status !== 'draft') return send(409, { detail: 'Only drafts can be edited' });
+        if ((creating && data.status !== 'draft') || (!creating && ('class_id' in data || 'status' in data))) return send(422, { detail: 'Draft fixture accepts only draft creation and content updates' });
+        if (typeof data.title !== 'string' || !data.title.trim() || [...data.title.trim()].length > 200) return send(422, { detail: 'Invalid title' });
+        const ids = data.questions?.map(q => q.question_id) ?? [];
+        if (!ids.length || new Set(ids).size !== ids.length || ids.some(id => !questions.some(q => q.id === id && q.is_active))) return send(400, { detail: 'Invalid questions' });
+        if (ids.some(id => questions.find(q => q.id === id).created_by !== actor.id)) return send(403, { detail: 'Question ownership required' });
+        if (data.due_at && (!Number.isFinite(new Date(data.due_at).getTime()) || !/(Z|[+-]\d\d:\d\d)$/.test(data.due_at))) return send(422, { detail: 'Timezone required' });
+        ids.forEach(id => lockedQuestions.add(id));
+        const changes = { title: data.title.trim(), description: data.description ?? null, questions: ids.map(question_id => ({ question_id })), due_at: data.due_at ?? null };
+        if (creating) {
+          const item = { ...changes, id: `draft-${assignments.length}`, class_id: classId, status: 'draft', created_by: actor.id, created_at: new Date().toISOString() };
+          assignments.unshift(item); return send(201, assignmentRead(item));
+        }
+        Object.assign(target, changes); return send(200, assignmentRead(target));
+      }
+      return send(404, { detail: 'Assignment fixture route not found' });
+    }
     if (url.pathname.startsWith('/api/v1/questions')) {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
       if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
@@ -111,7 +151,7 @@ const api = http.createServer((req, res) => {
         if (disabling && !target.is_active) return send(200, target);
         if (!target.is_active) return send(409, { detail: 'Question is disabled' });
         // The fixture keeps the lock private, like the real QuestionRead response.
-        if (target.id === 'question-0') return send(409, { detail: 'Question content is locked; create a new question' });
+        if (lockedQuestions.has(target.id)) return send(409, { detail: 'Question content is locked; create a new question' });
         if (disabling) target.is_active = false;
         else {
           const data = JSON.parse(body);
