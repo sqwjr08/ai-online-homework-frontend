@@ -82,6 +82,26 @@ const api = http.createServer((req, res) => {
       }
       const question = questions.find(item => url.pathname === `/api/v1/questions/${item.id}`);
       if (req.method === 'GET' && question) return question.created_by === actor.id ? send(200, question) : send(403, { detail: 'Forbidden' });
+      const target = question ?? questions.find(item => url.pathname === `/api/v1/questions/${item.id}/disable`);
+      const disabling = target && url.pathname.endsWith('/disable') && req.method === 'POST';
+      if (target && (disabling || (question && req.method === 'PATCH'))) {
+        if (target.created_by !== actor.id) return send(403, { detail: 'Forbidden' });
+        if (disabling && !target.is_active) return send(200, target);
+        if (!target.is_active) return send(409, { detail: 'Question is disabled' });
+        // The fixture keeps the lock private, like the real QuestionRead response.
+        if (target.id === 'question-0') return send(409, { detail: 'Question content is locked; create a new question' });
+        if (disabling) target.is_active = false;
+        else {
+          const data = JSON.parse(body);
+          if (typeof data.prompt !== 'string' || !data.prompt.trim() || [...data.prompt.trim()].length > 10000
+            || typeof data.reference_answer !== 'string' || !data.reference_answer.trim() || [...data.reference_answer.trim()].length > 20000
+            || typeof data.max_score !== 'number' || !Number.isFinite(data.max_score) || data.max_score <= 0
+            || (data.rubric != null && (typeof data.rubric !== 'string' || !data.rubric.trim() || [...data.rubric.trim()].length > 5000)))
+            return send(422, { detail: 'Invalid fixture question input' });
+          Object.assign(target, { prompt: data.prompt.trim(), reference_answer: data.reference_answer.trim(), max_score: data.max_score, rubric: data.rubric?.trim() ?? null });
+        }
+        target.updated_at = new Date().toISOString(); return send(200, target);
+      }
       return send(404, { detail: 'Question fixture route not found' });
     }
     if (url.pathname.startsWith('/api/v1/classes')) {
