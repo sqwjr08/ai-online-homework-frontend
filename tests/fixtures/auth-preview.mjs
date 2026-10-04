@@ -55,6 +55,16 @@ const reviewRecords = Array.from({ length: 25 }, (_, i) => {
       ai_comment: ai === 'succeeded' ? '虚构评分草稿，不是真实AI调用。' : null, final_score: confirmed ? 0 : null, final_comment: confirmed ? '虚构教师评语。' : null }] };
 });
 const confirmedRecords = new Map();
+assignments.push({ ...assignments.find(a => a.id === 'published-0'), id: 'history-0', title: '虚构归档历史作业', status: 'archived', archived_from: 'published' });
+reviewRecords.push({ ...reviewRecords[0], id: 'history-submission', assignment_id: 'history-0', student_id: 'fixture-student' });
+function studentRecord(record) {
+  const confirmed = record.status === 'confirmed';
+  return { view: 'student', id: record.id, assignment_id: record.assignment_id, student_id: record.student_id, status: record.status,
+    submitted_at: record.submitted_at, final_total_score: confirmed ? record.final_total_score : null,
+    reviewed_at: confirmed ? record.reviewed_at : null, reviewed_by: confirmed ? record.reviewed_by : null,
+    answers: record.answers.map(answer => ({ question_id: answer.question_id, answer_text: answer.answer_text,
+      final_score: confirmed ? answer.final_score : null, final_comment: confirmed ? answer.final_comment : null })) };
+}
 function teacherRecords() {
   const historical = ['published-0', 'legacy-0'].map(assignment_id => ({ ...reviewRecords[0], id: `submission-fixture-student-${assignment_id}`,
     assignment_id, student_id: 'fixture-student', answers: [], status: assignment_id === 'published-0' ? 'confirmed' : 'pending_teacher_review',
@@ -146,9 +156,10 @@ const api = http.createServer((req, res) => {
     const reviewMatch = /^\/api\/v1\/submissions\/([^/]+)$/.exec(url.pathname);
     if (reviewMatch && req.method === 'GET') {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
-      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
       const record = teacherRecords().find(item => item.id === reviewMatch[1]);
       if (!record) return send(404, { detail: 'Submission not found' });
+      if (actor.role === 'student') return record.student_id === actor.id ? send(200, studentRecord(record)) : send(403, { detail: 'Forbidden' });
+      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
       const assignment = assignments.find(item => item.id === record.assignment_id);
       if (!groups.some(group => group.id === assignment?.class_id && group.teacher_id === actor.id)) return send(403, { detail: 'Forbidden' });
       return send(200, record);
@@ -181,13 +192,8 @@ const api = http.createServer((req, res) => {
         };
         const mine = /^\/api\/v1\/assignments\/([^/]+)\/submissions\/my$/.exec(url.pathname);
         if (mine) {
-          const own = studentSubmissions.get(`${actor.id}:${mine[1]}`);
-          if (own) return send(200, own);
-          if (actor.id !== 'fixture-student' || !['published-0', 'legacy-0'].includes(mine[1])) return send(404, { detail: 'Submission not found' });
-          const confirmed = mine[1] === 'published-0';
-          return send(200, { view: 'student', id: `submission-${actor.id}-${mine[1]}`, assignment_id: mine[1], student_id: actor.id,
-            status: confirmed ? 'confirmed' : 'pending_teacher_review', submitted_at: '2030-01-01T01:00:00Z', answers: [],
-            final_total_score: confirmed ? 8 : null, reviewed_at: confirmed ? '2030-01-01T02:00:00Z' : null, reviewed_by: confirmed ? 'fixture-teacher' : null });
+          const own = teacherRecords().find(record => record.student_id === actor.id && record.assignment_id === mine[1]);
+          return own ? send(200, studentRecord(own)) : send(404, { detail: 'Submission not found' });
         }
         if (url.pathname === '/api/v1/assignments/my') return send(200, assignments.filter(item => item.class_id === actor.class_id && item.status === 'published' && (!url.searchParams.has('status') || url.searchParams.get('status') === 'published')).map(studentRead));
         const item = assignments.find(item => url.pathname === `/api/v1/assignments/${item.id}`);

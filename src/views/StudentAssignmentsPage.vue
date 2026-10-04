@@ -23,7 +23,7 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('before
 </script>
 <template>
   <main class="workspace student-assignments">
-    <RouterLink to="/student">← 我的学习</RouterLink><h1>我的作业</h1>
+    <RouterLink to="/student">← 我的学习</RouterLink><h1>我的作业</h1><p><RouterLink to="/student/results">通过已保存编号查询本人答案与成绩</RouterLink></p>
     <p>查看所属班级已发布的作业及本人提交状态。每道题填写文字答案，提交后不能修改、撤回或覆盖。</p>
     <button :disabled="state.loading || state.groupLoading || state.writing || state.checking" @click="refresh">刷新作业与班级</button>
     <p v-if="state.groupLoading" role="status">正在读取所属班级…</p><p v-else-if="state.groupError" class="error" role="alert">班级信息读取失败：{{ state.groupError }}</p>
@@ -45,7 +45,7 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('before
       <h3>本人提交状态</h3><p v-if="state.submissionState === 'loading'" role="status">正在查询本人提交…</p>
       <p v-else-if="state.submissionState === 'error'" class="error" role="alert">查询失败，暂时无法确认是否已提交：{{ state.submissionError }}</p>
       <p v-else-if="state.submissionState === 'none'">未查到你对此作业的提交记录。这不代表作业当前允许提交。</p>
-      <template v-else-if="state.submissionState === 'found'"><p>已提交 · {{ time(state.submission.submitted_at) }}</p><p>提交编号：{{ state.submission.id }}</p><p>{{ state.submission.status === 'confirmed' ? '教师已确认成绩，成绩详情将在后续查分节点开放。' : '答案已保存，等待教师确认成绩；这不代表后台批改已经完成。' }}</p><p class="muted">已有答案不能重复提交覆盖，当前不提供重交或撤回。</p></template>
+      <template v-else-if="state.submissionState === 'found'"><p>已提交 · {{ time(state.submission.submitted_at) }}</p><p>提交编号：{{ state.submission.id }}</p><p>{{ state.submission.status === 'confirmed' ? '教师已确认成绩，可查看逐题得分与评语。' : '答案已保存，等待教师确认成绩；这不代表后台批改已经完成。' }}</p><p><RouterLink :to="{ name: 'student-submission-result', params: { submissionId: state.submission.id } }">查看本人答案与成绩</RouterLink></p><p class="muted">已有答案不能重复提交覆盖，当前不提供重交或撤回。</p></template>
       <button :disabled="state.submissionState === 'loading' || state.writing || state.checking" @click="model.readSubmission">重新查询本人提交</button>
     </section>
   </main>
