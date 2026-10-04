@@ -37,6 +37,7 @@ function assignmentRead(item) {
   }) };
 }
 assignments.push({ ...assignments[0], id: 'published-0', title: '虚构已发布快照', status: 'published', snapshot: structuredClone(assignmentRead(assignments[0]).questions) },
+  { ...assignments[0], id: 'expired-0', title: '虚构已截止作业（仍可读取）', status: 'published', due_at: '2000-01-01T00:00:00Z', snapshot: structuredClone(assignmentRead(assignments[0]).questions) },
   { ...assignments[0], id: 'legacy-0', title: '虚构旧引用作业', status: 'published' },
   { ...assignments[0], id: 'archived-0', title: '虚构已归档草稿', status: 'archived', archived_from: 'draft' });
 const api = http.createServer((req, res) => {
@@ -96,6 +97,27 @@ const api = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname.startsWith('/api/v1/assignments')) {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (actor.role === 'student' && req.method === 'GET') {
+        const studentRead = item => {
+          const data = assignmentRead(item);
+          return { id: data.id, title: data.title, description: data.description, class_id: data.class_id, due_at: data.due_at,
+            status: data.status, view: 'student', question_source: data.question_source, created_by: data.created_by, created_at: data.created_at,
+            questions: data.questions.map(q => ({ question_id: q.question_id, position: q.position, prompt: q.prompt, image_urls: q.image_urls, max_score: q.max_score })) };
+        };
+        const mine = /^\/api\/v1\/assignments\/([^/]+)\/submissions\/my$/.exec(url.pathname);
+        if (mine) {
+          if (actor.id !== 'fixture-student' || !['published-0', 'legacy-0'].includes(mine[1])) return send(404, { detail: 'Submission not found' });
+          const confirmed = mine[1] === 'published-0';
+          return send(200, { view: 'student', id: `submission-${actor.id}-${mine[1]}`, assignment_id: mine[1], student_id: actor.id,
+            status: confirmed ? 'confirmed' : 'pending_teacher_review', submitted_at: '2030-01-01T01:00:00Z', answers: [],
+            final_total_score: confirmed ? 8 : null, reviewed_at: confirmed ? '2030-01-01T02:00:00Z' : null, reviewed_by: confirmed ? 'fixture-teacher' : null });
+        }
+        if (url.pathname === '/api/v1/assignments/my') return send(200, assignments.filter(item => item.class_id === actor.class_id && item.status === 'published' && (!url.searchParams.has('status') || url.searchParams.get('status') === 'published')).map(studentRead));
+        const item = assignments.find(item => url.pathname === `/api/v1/assignments/${item.id}`);
+        if (!item) return send(404, { detail: 'Assignment not found' });
+        if (item.class_id !== actor.class_id) return send(403, { detail: 'Forbidden' });
+        return item.status === 'published' ? send(200, studentRead(item)) : send(404, { detail: 'Assignment not found' });
+      }
       if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
       const owns = item => groups.some(g => g.id === item.class_id && g.teacher_id === actor.id);
       if (url.pathname === '/api/v1/assignments/my' && req.method === 'GET') return send(200, assignments.filter(item => owns(item) && (!url.searchParams.has('status') || item.status === url.searchParams.get('status'))).map(assignmentRead));
