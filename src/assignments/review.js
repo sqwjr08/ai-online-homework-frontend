@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 
 export const reviewStatus = value => ({ pending_teacher_review: '待教师确认', confirmed: '成绩已确认' }[value] ?? '未知人工状态');
 export const aiStatus = value => ({ pending: '等待后台批改', processing: '后台批改中', succeeded: 'AI草稿已生成', failed: '后台批改失败', cancelled: '后台任务已取消', legacy_unknown: '历史AI状态未知' }[value] ?? '未知AI状态');
-export const aiError = value => ({ timeout: '调用超时', provider_unavailable: '评分服务暂不可用', grading_failed: '评分未通过或处理失败' }[value] ?? (value ? '其他评分错误，请联系维护者核对' : '无记录'));
+export const aiError = value => ({ timeout: '调用超时', provider_unavailable: '评分服务暂不可用', grading_failed: '评分未通过或处理失败', retry_exhausted: '本轮后台尝试次数已耗尽' }[value] ?? (value ? '其他评分错误，请联系维护者核对' : '无记录'));
 export function teacherSubmission(data, assignmentId) {
   if (data?.view !== 'teacher' || data.assignment_id !== assignmentId || !Array.isArray(data.answers)) throw new Error('提交响应与当前教师作业不匹配，请重新读取。');
   return data;

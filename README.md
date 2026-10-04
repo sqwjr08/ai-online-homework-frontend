@@ -2,7 +2,7 @@
 
 面向一门课程、多个班级的简答题作业平台，角色为管理员、教师、学生。前端使用 Vue 3、Vue Router、Axios 和 Vite，后端独立使用 Python/FastAPI。
 
-**状态：开发中，16a–16c、17a–17d、18a–18c、19a–19b、20a–20c、21a–21b代码已完成。** 已实现账号管理、教师班级、学生注册入班，以及教师文字题库列表、搜索分页、详情、创建、编辑和停用，以及图片上传、预览和移除引用；教师可选班选题、排序并保存/编辑作业草稿，预览发布或归档作业；学生可读取本班作业、填写文字并进行一次正式提交、核对本人提交状态。17b起沿用暂不运行浏览器的安排，页面待手动检查。尚未进行真实后端联调，教师可读取提交和批改详情；人工确认成绩已接入，学生逐题查分与已知历史编号查询已接入，完整历史列表仍待后端接口。
+**状态：开发中，16a–16c、17a–17d、18a–18c、19a–19b、20a–20c、21a–21c代码已完成。** 已实现账号管理、教师班级、学生注册入班，以及教师文字题库列表、搜索分页、详情、创建、编辑和停用，以及图片上传、预览和移除引用；教师可选班选题、排序并保存/编辑作业草稿，预览发布或归档作业；学生可读取本班作业、填写文字并进行一次正式提交、核对本人提交状态。17b起沿用暂不运行浏览器的安排，页面待手动检查。尚未进行真实后端联调，教师可读取提交和批改详情；人工确认成绩已接入，学生逐题查分与已知历史编号查询已接入，完整历史列表仍待后端接口。
 
 ## 开发入口
 
@@ -41,10 +41,10 @@ npm run test:questions 文字题库测试
 npm run test:drafts 作业草稿测试
 npm run test:assignments 作业草稿、发布与归档测试
 npm run test:student-assignments 学生作业读取、文字提交与查分测试
-npm run test:review 教师提交读取与人工评分测试
+npm run test:review 教师提交读取、人工评分与AI重试测试
 ```
 
-20c通过21项学生作业/提交/查分测试及7项会话回归、预览脚本语法检查与构建；未重复运行无关历史测试。开发入口为 `http://127.0.0.1:5173`；同源 `/api/v1` 默认代理到 `http://127.0.0.1:8000`。启动Vite不会启动后端或worker。开发代理说明见[请求层文档](docs/api-client.md)，虚构预览见[会话说明](docs/auth-session.md)；待手动检查步骤见[账号管理](docs/accounts.md)、[教师班级](docs/classes.md)、[学生注册入班](docs/student-onboarding.md)、[题库](docs/questions.md)、[作业草稿](docs/assignment-drafts.md)、[发布归档](docs/assignment-lifecycle.md)、[学生作业](docs/student-assignments.md)、[文字提交](docs/student-submit.md)、[教师提交详情](docs/teacher-review.md)、[人工确认成绩](docs/grade-confirmation.md)和[学生查分](docs/student-results.md)。
+21c通过22项教师提交/评分/重试测试、预览脚本语法检查与构建；未重复运行无关历史测试。开发入口为 `http://127.0.0.1:5173`；同源 `/api/v1` 默认代理到 `http://127.0.0.1:8000`。启动Vite不会启动后端或worker。开发代理说明见[请求层文档](docs/api-client.md)，虚构预览见[会话说明](docs/auth-session.md)；待手动检查步骤见[账号管理](docs/accounts.md)、[教师班级](docs/classes.md)、[学生注册入班](docs/student-onboarding.md)、[题库](docs/questions.md)、[作业草稿](docs/assignment-drafts.md)、[发布归档](docs/assignment-lifecycle.md)、[学生作业](docs/student-assignments.md)、[文字提交](docs/student-submit.md)、[教师提交详情](docs/teacher-review.md)、[人工确认成绩](docs/grade-confirmation.md)、[学生查分](docs/student-results.md)和[AI重试](docs/ai-retry.md)。
 
 ## 开发边界
 
@@ -55,4 +55,4 @@ npm run test:review 教师提交读取与人工评分测试
 - 联调使用虚构数据与经确认的隔离环境；不自动启动真实模型 worker 或付费重试。
 - 不为前端节点擅自修改后端。完整学生历史列表等接口缺口见项目总览。
 
-下一开发节点：**21c AI状态与手动重试**。17b–21b及20c浏览器检查待用户执行。继续使用 `codex/node-16a-baseline` 开发分支；未推送到远端。
+下一开发节点：**22 小范围浏览器验收（待用户安排）**。17b–21c及20c浏览器检查待用户执行。继续使用 `codex/node-16a-baseline` 开发分支；未推送到远端。

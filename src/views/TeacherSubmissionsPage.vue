@@ -3,15 +3,17 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { session } from '../auth/session.js';
 import GradeConfirmation from '../components/GradeConfirmation.vue';
+import AiRetry from '../components/AiRetry.vue';
 import api from '../api/index.js';
 import { createReviewModel, comparisonRows, reviewStatus, aiStatus, aiError } from '../assignments/review.js';
 import { statusName, sourceName } from '../assignments/lifecycle.js';
 import QuestionImage from '../components/QuestionImage.vue';
 const route = useRoute(), model = createReviewModel(api), state = model.state, detailPanel = ref(null);
-const grading = ref(null), gradingActive = ref(false);
-function mayLeave() { return !session.state.user || !gradingActive.value || grading.value?.leave(); }
+const grading = ref(null), gradingActive = ref(false), retry = ref(null), retryActive = ref(false);
+const interactionLocked = computed(() => gradingActive.value || retryActive.value);
+function mayLeave() { return !session.state.user || ((!gradingActive.value || grading.value?.leave()) && (!retryActive.value || retry.value?.leave())); }
 onBeforeRouteLeave(mayLeave); onBeforeRouteUpdate(mayLeave);
-function beforeUnload(event) { if (gradingActive.value) { event.preventDefault(); event.returnValue = ''; } }
+function beforeUnload(event) { if (interactionLocked.value) { event.preventDefault(); event.returnValue = ''; } }
 window.addEventListener('beforeunload', beforeUnload);
 onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload));
 function confirmed(data) { state.detail = data; model.load(state.page, true); }
@@ -30,16 +32,16 @@ async function read(id) { const pending = model.read(id); await nextTick(); deta
     <section class="panel"><h2>{{ state.assignment?.title || '作业信息' }}</h2><p>作业 ID：{{ state.assignmentId }}</p>
       <p v-if="state.assignmentLoading" role="status">正在读取作业题面…</p><p v-else-if="state.assignmentError" class="error" role="alert">题面读取失败：{{ state.assignmentError }}。不会用当前题库内容替代历史题面。</p>
       <template v-else-if="state.assignment"><p>{{ statusName(state.assignment.status) }} · 内容来源：{{ sourceName(state.assignment.question_source) }}</p><p>班级 ID：{{ state.assignment.class_id }} · {{ state.assignment.questions.length }} 题</p><p v-if="state.assignment.question_source !== 'snapshot'" class="notice">此作业内容不是发布快照，请按实际来源核对，不能视为发布时保存的题面。</p></template>
-      <button :disabled="gradingActive || state.assignmentLoading" @click="model.loadAssignment">重新读取作业题面</button>
+      <button :disabled="interactionLocked || state.assignmentLoading" @click="model.loadAssignment">重新读取作业题面</button>
     </section>
     <section class="panel"><h2>提交列表</h2><div v-if="state.progress" class="notice" role="status">本作业已提交 {{ state.progress.submitted_count }} 份 · 待教师确认 {{ state.progress.pending_count }} 份 · 已确认 {{ state.progress.confirmed_count }} 份</div>
       <p class="muted">统计为整份作业的提交情况，不随筛选变化；不是AI完成率，也不代表全班人数。接口未提供学生姓名，此处使用学生ID。</p>
-      <div class="actions"><label for="review-filter">人工状态</label><select id="review-filter" v-model="state.filter" :disabled="gradingActive" @change="model.load(1)"><option value="">全部</option><option value="pending_teacher_review">待教师确认</option><option value="confirmed">已确认</option></select><button :disabled="gradingActive || state.loading" @click="model.load(state.page)">刷新提交列表</button></div>
+      <div class="actions"><label for="review-filter">人工状态</label><select id="review-filter" v-model="state.filter" :disabled="interactionLocked" @change="model.load(1)"><option value="">全部</option><option value="pending_teacher_review">待教师确认</option><option value="confirmed">已确认</option></select><button :disabled="interactionLocked || state.loading" @click="model.load(state.page)">刷新提交列表</button></div>
       <p v-if="state.loading" role="status">正在读取提交…</p><p v-else-if="state.error" class="error" role="alert">{{ state.error }}</p><p v-else-if="!state.items.length">没有符合条件的提交。</p>
-      <ul v-else><li v-for="item in state.items" :key="item.id"><p>学生 ID：{{ item.student_id }}</p><p>{{ reviewStatus(item.status) }} · {{ aiStatus(item.ai_status) }}</p><p>提交：{{ time(item.submitted_at) }}（{{ zone }}）</p><p v-if="item.status === 'confirmed'">教师确认总分：{{ item.final_total_score ?? '未记录' }}</p><button :disabled="gradingActive" @click="read(item.id)">查看答案与批改详情</button></li></ul>
-      <div class="actions"><label for="review-size">每页</label><select id="review-size" v-model.number="state.pageSize" :disabled="gradingActive || state.loading" @change="model.load(1)"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select><span>筛选后 {{ state.total }} 份 · 第 {{ state.page }} / {{ pages }} 页</span><button :disabled="gradingActive || state.loading || !!state.error || state.page <= 1" @click="model.load(state.page - 1)">上一页</button><button :disabled="gradingActive || state.loading || !!state.error || state.page >= pages || state.page >= 1000000" @click="model.load(state.page + 1)">下一页</button></div>
+      <ul v-else><li v-for="item in state.items" :key="item.id"><p>学生 ID：{{ item.student_id }}</p><p>{{ reviewStatus(item.status) }} · {{ aiStatus(item.ai_status) }}</p><p>提交：{{ time(item.submitted_at) }}（{{ zone }}）</p><p v-if="item.status === 'confirmed'">教师确认总分：{{ item.final_total_score ?? '未记录' }}</p><button :disabled="interactionLocked" @click="read(item.id)">查看答案与批改详情</button></li></ul>
+      <div class="actions"><label for="review-size">每页</label><select id="review-size" v-model.number="state.pageSize" :disabled="interactionLocked || state.loading" @change="model.load(1)"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select><span>筛选后 {{ state.total }} 份 · 第 {{ state.page }} / {{ pages }} 页</span><button :disabled="interactionLocked || state.loading || !!state.error || state.page <= 1" @click="model.load(state.page - 1)">上一页</button><button :disabled="interactionLocked || state.loading || !!state.error || state.page >= pages || state.page >= 1000000" @click="model.load(state.page + 1)">下一页</button></div>
     </section>
-    <section v-if="state.selectedId" ref="detailPanel" tabindex="-1" class="panel"><div class="actions"><h2>提交详情</h2><button :disabled="gradingActive" @click="model.close">关闭详情</button><button :disabled="gradingActive || state.detailLoading" @click="model.read(state.selectedId)">刷新此提交</button></div>
+    <section v-if="state.selectedId" ref="detailPanel" tabindex="-1" class="panel"><div class="actions"><h2>提交详情</h2><button :disabled="interactionLocked" @click="model.close">关闭详情</button><button :disabled="interactionLocked || state.detailLoading" @click="model.read(state.selectedId)">刷新此提交</button></div>
       <p v-if="state.detailLoading" role="status">正在读取最新提交…</p><p v-else-if="state.detailError" class="error" role="alert">{{ state.detailError }}</p>
       <template v-else-if="state.detail"><p>提交 ID：{{ state.detail.id }} · 学生 ID：{{ state.detail.student_id }}</p><p>{{ reviewStatus(state.detail.status) }} · {{ aiStatus(state.detail.ai_status) }}</p>
         <p>AI草稿总分：{{ state.detail.ai_total_score ?? '尚无草稿分数' }}（仅供教师参考）</p><p v-if="state.detail.status === 'confirmed'">教师最终总分：{{ state.detail.final_total_score ?? '未记录' }} · 确认时间：{{ time(state.detail.reviewed_at) }}（{{ zone }}） · 确认人 ID：{{ state.detail.reviewed_by ?? '未记录' }}。成绩已锁定，目前没有更正入口。</p><p v-else class="notice">最终成绩尚未确认，学生看不到AI草稿。AI失败或尚无结果不妨碍人工评分。</p>
@@ -49,7 +51,8 @@ async function read(id) { const pending = model.read(id); await nextTick(); deta
           <template v-else><h4>学生答案</h4><p class="text">{{ row.answer.answer_text }}</p><h4>AI草稿（非最终成绩）</h4><p>分数：{{ row.answer.ai_score ?? '暂无' }}</p><p class="text">{{ row.answer.ai_comment ?? '暂无评语' }}</p><template v-if="state.detail.status === 'confirmed'"><h4>教师已确认结果</h4><p>分数：{{ row.answer.final_score ?? '未记录' }}</p><p class="text">{{ row.answer.final_comment ?? '未填写评语' }}</p></template></template>
         </li></ol>
         <div v-if="comparison.unmatched.length" class="notice"><h3>暂无法对照题面的答案</h3><p>题面缺失或引用不匹配。以下仅展示提交原文，不据当前题库补题。</p><div v-for="(answer, i) in comparison.unmatched" :key="i"><p>题目 ID：{{ answer.question_id }}</p><p class="text">{{ answer.answer_text }}</p></div></div>
-        <GradeConfirmation ref="grading" :key="state.detail.id" :assignment="state.assignment" :submission="state.detail" @lock="gradingActive = $event" @confirmed="confirmed" @refresh="refreshReview" @checked="({ assignment, submission }) => { state.assignment = assignment; state.detail = submission; }" />
+        <AiRetry ref="retry" :key="'retry-' + state.detail.id" :submission="state.detail" :disabled="gradingActive" @lock="retryActive = $event" @updated="confirmed" />
+        <GradeConfirmation :disabled="retryActive" ref="grading" :key="state.detail.id" :assignment="state.assignment" :submission="state.detail" @lock="gradingActive = $event" @confirmed="confirmed" @refresh="refreshReview" @checked="({ assignment, submission }) => { state.assignment = assignment; state.detail = submission; }" />
       </template>
     </section>
   </main>

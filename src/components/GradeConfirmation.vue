@@ -2,10 +2,10 @@
 import { computed, onBeforeUnmount, watch } from 'vue';
 import api from '../api/index.js';
 import { createGrading, gradeable, gradeInput } from '../assignments/grading.js';
-const props = defineProps({ assignment: Object, submission: Object });
+const props = defineProps({ assignment: Object, submission: Object, disabled: Boolean });
 const emit = defineEmits(['lock', 'confirmed', 'checked', 'refresh']);
 const model = createGrading(api, data => emit('confirmed', data), data => emit('checked', data)), state = model.state;
-const eligible = computed(() => gradeable(props.assignment, props.submission));
+const eligible = computed(() => !props.disabled && gradeable(props.assignment, props.submission));
 const preview = computed(() => gradeInput(state.assignment?.questions ?? [], state.fields));
 watch(() => state.active, value => emit('lock', value), { flush: 'sync' });
 watch(() => state.fields, () => { state.accepted = false; }, { deep: true, flush: 'sync' });

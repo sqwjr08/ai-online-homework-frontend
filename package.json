@@ -16,7 +16,7 @@
     "test:drafts": "node --test tests/drafts.test.js",
     "test:assignments": "node --test tests/drafts.test.js tests/assignment-lifecycle.test.js",
     "test:student-assignments": "node --test tests/student-assignments.test.js tests/student-submit.test.js tests/student-results.test.js",
-    "test:review": "node --test tests/review.test.js tests/grading.test.js"
+    "test:review": "node --test tests/review.test.js tests/grading.test.js tests/ai-retry.test.js"
   },
   "dependencies": {
     "axios": "^1.9.0",

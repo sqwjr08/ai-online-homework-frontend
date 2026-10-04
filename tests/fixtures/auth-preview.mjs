@@ -129,6 +129,21 @@ const api = http.createServer((req, res) => {
     }
     if (req.url === '/api/v1/auth/logout') return send(200, { message: 'Discard token' });
     const url = new URL(req.url, 'http://localhost');
+    const retryMatch = /^\/api\/v1\/submissions\/([^/]+)\/retry-grading$/.exec(url.pathname);
+    if (retryMatch && req.method === 'POST') {
+      if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
+      const record = teacherRecords().find(item => item.id === retryMatch[1]);
+      if (!record) return send(404, { detail: 'Submission not found' });
+      const assignment = assignments.find(item => item.id === record.assignment_id);
+      if (!groups.some(group => group.id === assignment?.class_id && group.teacher_id === actor.id)) return send(403, { detail: 'Forbidden' });
+      const data = JSON.parse(body), count = data.expected_retry_count;
+      if (Object.keys(data).some(key => key !== 'expected_retry_count') || !Number.isInteger(count) || count < 0 || count > 2147483647) return send(422, { detail: 'Invalid retry count' });
+      if (record.status !== 'pending_teacher_review' || record.ai_status !== 'failed' || record.ai_retry_count !== count) return send(409, { detail: 'Retry status or count changed' });
+      const result = { ...record, ai_status: 'pending', ai_retry_count: count + 1, ai_next_attempt_at: new Date(Date.now() + 5000).toISOString() };
+      // Reuse the in-memory submission overlay; no worker or provider is invoked.
+      confirmedRecords.set(result.id, result); return send(202, result);
+    }
     const confirmMatch = /^\/api\/v1\/submissions\/([^/]+)\/confirm-grade$/.exec(url.pathname);
     if (confirmMatch && req.method === 'POST') {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
@@ -385,6 +400,7 @@ const api = http.createServer((req, res) => {
 });
 await new Promise(resolve => api.listen(0, '127.0.0.1', resolve));
 const vite = await createServer({ configFile: false, envDir: false, plugins: [vue()],
+  define: { 'import.meta.env.VITE_ENABLE_AI_RETRY': JSON.stringify('true') },
   server: { host: '127.0.0.1', port: 5174, strictPort: true, proxy: createDevProxy(`http://127.0.0.1:${api.address().port}`) } });
 await vite.listen();
 console.log('Fictional auth preview: http://127.0.0.1:5174 ; commands: offline / online / expired / stop');
