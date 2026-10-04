@@ -26,6 +26,7 @@ const questions = Array.from({ length: 26 }, (_, i) => ({ id: `question-${i}`, p
   created_by: 'fixture-teacher', is_active: i !== 25, created_at: '2030-01-01T00:00:00Z', updated_at: '2030-01-01T00:00:00Z' }));
 // In-memory image transport only; Pillow validation/re-encoding remains a backend check.
 const images = new Map();
+const studentSubmissions = new Map();
 const lockedQuestions = new Set(['question-0']);
 const assignments = [{ id: 'draft-0', title: '虚构草稿示例', description: null, class_id: 'class-demo',
   questions: [{ question_id: 'question-0' }], due_at: null, status: 'draft', created_by: 'fixture-teacher', created_at: '2030-01-01T00:00:00Z' }];
@@ -37,6 +38,7 @@ function assignmentRead(item) {
   }) };
 }
 assignments.push({ ...assignments[0], id: 'published-0', title: '虚构已发布快照', status: 'published', snapshot: structuredClone(assignmentRead(assignments[0]).questions) },
+  { ...assignments[0], id: 'open-0', title: '虚构可作答作业', status: 'published', snapshot: structuredClone(assignmentRead(assignments[0]).questions) },
   { ...assignments[0], id: 'expired-0', title: '虚构已截止作业（仍可读取）', status: 'published', due_at: '2000-01-01T00:00:00Z', snapshot: structuredClone(assignmentRead(assignments[0]).questions) },
   { ...assignments[0], id: 'legacy-0', title: '虚构旧引用作业', status: 'published' },
   { ...assignments[0], id: 'archived-0', title: '虚构已归档草稿', status: 'archived', archived_from: 'draft' });
@@ -97,6 +99,23 @@ const api = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname.startsWith('/api/v1/assignments')) {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      const submitMatch = /^\/api\/v1\/assignments\/([^/]+)\/submissions$/.exec(url.pathname);
+      if (submitMatch && req.method === 'POST') {
+        if (actor.role !== 'student') return send(403, { detail: 'Students only' });
+        const item = assignments.find(item => item.id === submitMatch[1]);
+        if (!item || item.status !== 'published') return send(404, { detail: 'Assignment not found' });
+        if (item.class_id !== actor.class_id) return send(403, { detail: 'Forbidden' });
+        if (!groups.find(g => g.id === item.class_id)?.is_active) return send(409, { detail: 'Class archived' });
+        if (item.due_at && new Date(item.due_at).getTime() <= Date.now()) return send(400, { detail: 'Assignment is closed' });
+        const key = `${actor.id}:${item.id}`;
+        if (studentSubmissions.has(key) || (actor.id === 'fixture-student' && ['published-0', 'legacy-0'].includes(item.id))) return send(409, { detail: 'Assignment already submitted' });
+        const answers = JSON.parse(body).answers;
+        if (!Array.isArray(answers) || answers.some(a => typeof a.answer_text !== 'string' || !a.answer_text.trim() || [...a.answer_text].length > 20000)) return send(422, { detail: 'Invalid answer' });
+        if (answers.length !== item.questions.length || new Set(answers.map(a => a.question_id)).size !== answers.length || answers.some(a => !item.questions.some(q => q.question_id === a.question_id))) return send(400, { detail: 'Answer mismatch' });
+        const result = { view: 'student', id: `submission-${studentSubmissions.size}`, assignment_id: item.id, student_id: actor.id,
+          status: 'pending_teacher_review', submitted_at: new Date().toISOString(), answers: answers.map(a => ({ question_id: a.question_id, answer_text: a.answer_text, final_score: null, final_comment: null })), final_total_score: null, reviewed_by: null, reviewed_at: null };
+        studentSubmissions.set(key, result); return send(201, result);
+      }
       if (actor.role === 'student' && req.method === 'GET') {
         const studentRead = item => {
           const data = assignmentRead(item);
@@ -106,6 +125,8 @@ const api = http.createServer((req, res) => {
         };
         const mine = /^\/api\/v1\/assignments\/([^/]+)\/submissions\/my$/.exec(url.pathname);
         if (mine) {
+          const own = studentSubmissions.get(`${actor.id}:${mine[1]}`);
+          if (own) return send(200, own);
           if (actor.id !== 'fixture-student' || !['published-0', 'legacy-0'].includes(mine[1])) return send(404, { detail: 'Submission not found' });
           const confirmed = mine[1] === 'published-0';
           return send(200, { view: 'student', id: `submission-${actor.id}-${mine[1]}`, assignment_id: mine[1], student_id: actor.id,

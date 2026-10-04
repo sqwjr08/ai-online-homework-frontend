@@ -6,7 +6,7 @@ const content = {
     ['班级作业', '创建草稿、预览发布和归档班级作业。', '/teacher/assignments'], ['题库', '整理简答题、参考答案与评分标准。', '/teacher/questions'], ['班级', '管理班级码和本班学生。', '/teacher/classes'],
   ] },
   student: { title: '我的学习', description: '在这里查看班级作业，提交答案并查询成绩。', cards: [
-    ['我的作业', '查看已发布题面、截止时间和本人提交状态。', '/student/assignments'], ['我的班级', '通过班级码加入班级，查看所属班级。', '/student/class'],
+    ['我的作业', '查看作业、填写文字答案并查询本人提交状态。', '/student/assignments'], ['我的班级', '通过班级码加入班级，查看所属班级。', '/student/class'],
   ] },
   admin: { title: '管理工作台', description: '维护账号与班级，让教学有序进行。', cards: [
     ['账号管理', '查询与创建账号，管理启用状态和密码。', '/admin/users'], ['班级管理', '查看班级及成员，协助管理班级。'],
