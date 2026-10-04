@@ -14,6 +14,7 @@ test('GET-only pagination passes human filter and keeps global progress and zero
   assert.equal(model.state.total, 2); assert.deepEqual(model.state.progress, progress);
   await model.read('s'); assert.equal(model.state.detail.ai_total_score, 0); assert.equal(model.state.detail.final_total_score, 0);
   assert.equal(model.state.detail.status, 'pending_teacher_review'); assert.equal(model.state.detail.ai_status, 'failed');
+  await model.load(1, true); assert.equal(model.state.detail.id, 's'); assert.equal(model.state.selectedId, 's');
 });
 test('missing snapshot does not block independent list/detail or fetch current question bank', async () => {
   const calls = []; const model = createReviewModel({ get: async (url, { params }) => {

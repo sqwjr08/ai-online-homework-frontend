@@ -36,7 +36,7 @@ async function applyAction() {
 <template>
   <main class="workspace drafts-page">
     <RouterLink to="/teacher">← 教师工作台</RouterLink><h1>班级作业</h1>
-    <p>草稿对学生不可见；发布后学生可查看并提交。可查看学生提交及批改详情；成绩确认暂未开放。</p>
+    <p>草稿对学生不可见；发布后学生可查看并提交。可查看学生提交及批改详情；可人工确认成绩，确认后锁定。</p>
     <p v-if="state.success" class="notice" role="status">{{ state.success }}</p>
     <section class="panel"><h2>作业列表</h2>
       <label for="assignment-status">状态筛选</label><select id="assignment-status" v-model="state.filter" :disabled="state.busy || action.busy || refreshing" @change="model.load"><option value="draft">草稿</option><option value="published">已发布</option><option value="archived">已归档</option><option value="">全部</option></select>

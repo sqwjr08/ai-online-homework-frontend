@@ -39,9 +39,9 @@ export function createReviewModel(api) {
       state.assignment = data; state.assignmentLoading = false;
     }, error => { state.assignmentLoading = false; state.assignmentError = error.message; });
   }
-  async function load(page = 1) {
+  async function load(page = 1, keepDetail = false) {
     if (disposed || !state.assignmentId) return;
-    const id = state.assignmentId; close(); state.page = page; state.items = []; state.total = 0; state.progress = null; state.loading = true; state.error = '';
+    const id = state.assignmentId; if (!keepDetail) close(); state.page = page; state.items = []; state.total = 0; state.progress = null; state.loading = true; state.error = '';
     await request('list', `/assignments/${id}/submissions`, { page, page_size: state.pageSize, ...(state.filter ? { status: state.filter } : {}) }, data => {
       state.items = data.items.map(item => teacherSubmission(item, id)); state.total = data.total; state.page = data.page; state.pageSize = data.page_size;
       state.progress = data.progress; state.loading = false;

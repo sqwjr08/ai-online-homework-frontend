@@ -54,6 +54,7 @@ const reviewRecords = Array.from({ length: 25 }, (_, i) => {
     answers: [{ question_id: 'question-0', answer_text: `虚构答案${i + 1}：索引用于检索。\n第二行原文。`, ai_score: ai === 'succeeded' ? 0 : null,
       ai_comment: ai === 'succeeded' ? '虚构评分草稿，不是真实AI调用。' : null, final_score: confirmed ? 0 : null, final_comment: confirmed ? '虚构教师评语。' : null }] };
 });
+const confirmedRecords = new Map();
 function teacherRecords() {
   const historical = ['published-0', 'legacy-0'].map(assignment_id => ({ ...reviewRecords[0], id: `submission-fixture-student-${assignment_id}`,
     assignment_id, student_id: 'fixture-student', answers: [], status: assignment_id === 'published-0' ? 'confirmed' : 'pending_teacher_review',
@@ -61,7 +62,7 @@ function teacherRecords() {
     reviewed_by: assignment_id === 'published-0' ? 'fixture-teacher' : null, reviewed_at: assignment_id === 'published-0' ? '2030-01-01T02:00:00Z' : null }));
   return [...reviewRecords, ...historical, ...[...studentSubmissions.values()].map(item => ({ ...item, view: 'teacher', ai_status: 'pending', ai_attempts: 0,
     ai_retry_count: 0, ai_next_attempt_at: null, ai_error_code: null, ai_total_score: null,
-    answers: item.answers.map(answer => ({ ...answer, ai_score: null, ai_comment: null })) }))];
+    answers: item.answers.map(answer => ({ ...answer, ai_score: null, ai_comment: null })) }))].map(item => confirmedRecords.get(item.id) ?? item);
 }
 const api = http.createServer((req, res) => {
   const chunks = [];
@@ -118,6 +119,30 @@ const api = http.createServer((req, res) => {
     }
     if (req.url === '/api/v1/auth/logout') return send(200, { message: 'Discard token' });
     const url = new URL(req.url, 'http://localhost');
+    const confirmMatch = /^\/api\/v1\/submissions\/([^/]+)\/confirm-grade$/.exec(url.pathname);
+    if (confirmMatch && req.method === 'POST') {
+      if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
+      const record = teacherRecords().find(item => item.id === confirmMatch[1]);
+      if (!record) return send(404, { detail: 'Submission not found' });
+      const assignment = assignments.find(item => item.id === record.assignment_id);
+      if (!groups.some(group => group.id === assignment?.class_id && group.teacher_id === actor.id)) return send(403, { detail: 'Forbidden' });
+      if (record.status !== 'pending_teacher_review' || assignment.status === 'draft' || assignment.archived_from === 'draft') return send(409, { detail: 'Grade locked or assignment not published' });
+      const questions = assignmentRead(assignment).questions, ids = questions.map(q => q.question_id), answerIds = record.answers.map(a => a.question_id);
+      if (!ids.length || new Set(answerIds).size !== ids.length || answerIds.length !== ids.length || answerIds.some(id => !ids.includes(id))) return send(409, { detail: 'Submission questions require repair' });
+      const data = JSON.parse(body), grades = data.grades;
+      if (Object.keys(data).some(key => key !== 'grades') || !Array.isArray(grades) || !grades.length || grades.some(g => Object.keys(g).some(key => !['question_id', 'final_score', 'final_comment'].includes(key)) || typeof g.final_score !== 'number' || !Number.isFinite(g.final_score) || g.final_score < 0 || Math.abs(g.final_score * 100 - Math.round(g.final_score * 100)) > 0.000001 || (g.final_comment != null && (typeof g.final_comment !== 'string' || [...g.final_comment].length > 1000)))) return send(422, { detail: 'Invalid grades' });
+      if (grades.length !== ids.length || new Set(grades.map(g => g.question_id)).size !== ids.length || grades.some(g => !ids.includes(g.question_id) || g.final_score > questions.find(q => q.question_id === g.question_id).max_score)) return send(400, { detail: 'Grades mismatch or out of range' });
+      const result = { ...record, status: 'confirmed', final_total_score: grades.reduce((sum, g) => sum + Math.round(g.final_score * 100), 0) / 100,
+        reviewed_at: new Date().toISOString(), reviewed_by: actor.id, ai_next_attempt_at: null,
+        ai_status: ['pending', 'processing', 'failed'].includes(record.ai_status) ? 'cancelled' : record.ai_status,
+        answers: record.answers.map(answer => { const grade = grades.find(g => g.question_id === answer.question_id); return { ...answer, final_score: grade.final_score, final_comment: grade.final_comment?.trim() || null }; }) };
+      confirmedRecords.set(result.id, result);
+      const key = `${result.student_id}:${result.assignment_id}`;
+      if (studentSubmissions.has(key)) studentSubmissions.set(key, { ...studentSubmissions.get(key), status: result.status, final_total_score: result.final_total_score,
+        reviewed_at: result.reviewed_at, reviewed_by: result.reviewed_by, answers: result.answers.map(({ question_id, answer_text, final_score, final_comment }) => ({ question_id, answer_text, final_score, final_comment })) });
+      return send(200, result);
+    }
     const reviewMatch = /^\/api\/v1\/submissions\/([^/]+)$/.exec(url.pathname);
     if (reviewMatch && req.method === 'GET') {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
