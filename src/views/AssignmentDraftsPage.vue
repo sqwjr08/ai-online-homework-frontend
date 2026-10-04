@@ -36,14 +36,14 @@ async function applyAction() {
 <template>
   <main class="workspace drafts-page">
     <RouterLink to="/teacher">← 教师工作台</RouterLink><h1>班级作业</h1>
-    <p>草稿对学生不可见；发布后学生可查看并提交。提交查看和成绩确认将在后续节点开放。</p>
+    <p>草稿对学生不可见；发布后学生可查看并提交。可查看学生提交及批改详情；成绩确认暂未开放。</p>
     <p v-if="state.success" class="notice" role="status">{{ state.success }}</p>
     <section class="panel"><h2>作业列表</h2>
       <label for="assignment-status">状态筛选</label><select id="assignment-status" v-model="state.filter" :disabled="state.busy || action.busy || refreshing" @change="model.load"><option value="draft">草稿</option><option value="published">已发布</option><option value="archived">已归档</option><option value="">全部</option></select>
       <div class="actions"><button :disabled="state.loading || state.busy || action.busy || refreshing" @click="model.load">刷新列表</button><button :disabled="!!state.form || state.reading || !!action.id || refreshing" @click="begin">新建草稿</button></div>
       <p v-if="state.loading" role="status">正在读取作业…</p><p v-else-if="state.listError" class="error" role="alert">{{ state.listError }}</p>
       <p v-else-if="!state.items.length">没有符合条件的作业。</p>
-      <ul v-else><li v-for="item in state.items" :key="item.id"><strong>{{ item.title }}</strong> · {{ statusName(item.status) }}<p>{{ className(item.class_id) }} · {{ item.questions.length }} 题 · {{ time(item.due_at) }}</p><p class="muted">ID：{{ item.id }} · {{ sourceName(item.question_source) }}</p><div class="actions"><button :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id)">查看详情</button><button v-if="item.status === 'draft'" :disabled="!!state.form || state.reading || !!action.id || refreshing" @click="open(item.id)">编辑草稿</button><button v-if="item.status === 'draft'" :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id, 'publish')">发布前预览</button><button v-if="item.status !== 'archived'" :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id, 'archive')">归档</button></div></li></ul>
+      <ul v-else><li v-for="item in state.items" :key="item.id"><strong>{{ item.title }}</strong> · {{ statusName(item.status) }}<p>{{ className(item.class_id) }} · {{ item.questions.length }} 题 · {{ time(item.due_at) }}</p><p class="muted">ID：{{ item.id }} · {{ sourceName(item.question_source) }}</p><div class="actions"><RouterLink :to="{ name: 'teacher-submissions', params: { assignmentId: item.id } }">查看提交与批改</RouterLink><button :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id)">查看详情</button><button v-if="item.status === 'draft'" :disabled="!!state.form || state.reading || !!action.id || refreshing" @click="open(item.id)">编辑草稿</button><button v-if="item.status === 'draft'" :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id, 'publish')">发布前预览</button><button v-if="item.status !== 'archived'" :disabled="!!state.form || state.reading || action.busy || refreshing" @click="preview(item.id, 'archive')">归档</button></div></li></ul>
       <p class="muted">接口返回所选状态的全部作业，当前没有服务端分页或标题搜索。</p>
     </section>
     <section v-if="action.id" ref="actionPanel" tabindex="-1" class="panel">

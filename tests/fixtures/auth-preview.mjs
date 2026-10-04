@@ -42,6 +42,27 @@ assignments.push({ ...assignments[0], id: 'published-0', title: '虚构已发布
   { ...assignments[0], id: 'expired-0', title: '虚构已截止作业（仍可读取）', status: 'published', due_at: '2000-01-01T00:00:00Z', snapshot: structuredClone(assignmentRead(assignments[0]).questions) },
   { ...assignments[0], id: 'legacy-0', title: '虚构旧引用作业', status: 'published' },
   { ...assignments[0], id: 'archived-0', title: '虚构已归档草稿', status: 'archived', archived_from: 'draft' });
+// Fictional teacher review records only: no model calls, worker or persisted data.
+const reviewRecords = Array.from({ length: 25 }, (_, i) => {
+  const confirmed = i % 4 === 0, ai = ['pending', 'processing', 'succeeded', 'failed', 'cancelled', 'legacy_unknown'][i % 6];
+  return { id: `review-${i}`, view: 'teacher', assignment_id: 'published-0', student_id: `fictional-review-student-${i}`,
+    status: confirmed ? 'confirmed' : 'pending_teacher_review', ai_status: ai, ai_attempts: ai === 'pending' ? 0 : 1,
+    ai_retry_count: 0, ai_next_attempt_at: null, ai_error_code: ai === 'failed' ? 'timeout' : null,
+    ai_total_score: ai === 'succeeded' ? 0 : null, final_total_score: confirmed ? 0 : null,
+    submitted_at: `2030-01-01T01:${String(i).padStart(2, '0')}:00Z`, reviewed_by: confirmed ? 'fixture-teacher' : null,
+    reviewed_at: confirmed ? '2030-01-01T02:00:00Z' : null,
+    answers: [{ question_id: 'question-0', answer_text: `虚构答案${i + 1}：索引用于检索。\n第二行原文。`, ai_score: ai === 'succeeded' ? 0 : null,
+      ai_comment: ai === 'succeeded' ? '虚构评分草稿，不是真实AI调用。' : null, final_score: confirmed ? 0 : null, final_comment: confirmed ? '虚构教师评语。' : null }] };
+});
+function teacherRecords() {
+  const historical = ['published-0', 'legacy-0'].map(assignment_id => ({ ...reviewRecords[0], id: `submission-fixture-student-${assignment_id}`,
+    assignment_id, student_id: 'fixture-student', answers: [], status: assignment_id === 'published-0' ? 'confirmed' : 'pending_teacher_review',
+    ai_status: 'legacy_unknown', ai_total_score: null, final_total_score: assignment_id === 'published-0' ? 8 : null,
+    reviewed_by: assignment_id === 'published-0' ? 'fixture-teacher' : null, reviewed_at: assignment_id === 'published-0' ? '2030-01-01T02:00:00Z' : null }));
+  return [...reviewRecords, ...historical, ...[...studentSubmissions.values()].map(item => ({ ...item, view: 'teacher', ai_status: 'pending', ai_attempts: 0,
+    ai_retry_count: 0, ai_next_attempt_at: null, ai_error_code: null, ai_total_score: null,
+    answers: item.answers.map(answer => ({ ...answer, ai_score: null, ai_comment: null })) }))];
+}
 const api = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', chunk => { chunks.push(chunk); });
@@ -97,6 +118,16 @@ const api = http.createServer((req, res) => {
     }
     if (req.url === '/api/v1/auth/logout') return send(200, { message: 'Discard token' });
     const url = new URL(req.url, 'http://localhost');
+    const reviewMatch = /^\/api\/v1\/submissions\/([^/]+)$/.exec(url.pathname);
+    if (reviewMatch && req.method === 'GET') {
+      if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
+      if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
+      const record = teacherRecords().find(item => item.id === reviewMatch[1]);
+      if (!record) return send(404, { detail: 'Submission not found' });
+      const assignment = assignments.find(item => item.id === record.assignment_id);
+      if (!groups.some(group => group.id === assignment?.class_id && group.teacher_id === actor.id)) return send(403, { detail: 'Forbidden' });
+      return send(200, record);
+    }
     if (url.pathname.startsWith('/api/v1/assignments')) {
       if (!actor || mode === 'expired') return send(401, { detail: 'Token revoked' });
       const submitMatch = /^\/api\/v1\/assignments\/([^/]+)\/submissions$/.exec(url.pathname);
@@ -141,6 +172,17 @@ const api = http.createServer((req, res) => {
       }
       if (actor.role !== 'teacher') return send(403, { detail: 'Teacher fixture only' });
       const owns = item => groups.some(g => g.id === item.class_id && g.teacher_id === actor.id);
+      if (submitMatch && req.method === 'GET') {
+        const assignment = assignments.find(item => item.id === submitMatch[1]);
+        if (!assignment) return send(404, { detail: 'Assignment not found' });
+        if (!owns(assignment)) return send(403, { detail: 'Forbidden' });
+        const page = Number(url.searchParams.get('page') ?? 1), size = Number(url.searchParams.get('page_size') ?? 20), status = url.searchParams.get('status');
+        if (!Number.isInteger(page) || page < 1 || page > 1000000 || !Number.isInteger(size) || size < 1 || size > 100 || (status && !['confirmed', 'pending_teacher_review'].includes(status))) return send(422, { detail: 'Invalid pagination or status' });
+        const all = teacherRecords().filter(item => item.assignment_id === assignment.id).sort((a, b) => a.submitted_at.localeCompare(b.submitted_at) || a.id.localeCompare(b.id));
+        const items = all.filter(item => !status || item.status === status);
+        return send(200, { items: items.slice((page - 1) * size, page * size), total: items.length, page, page_size: size,
+          progress: { submitted_count: all.length, pending_count: all.filter(item => item.status === 'pending_teacher_review').length, confirmed_count: all.filter(item => item.status === 'confirmed').length } });
+      }
       if (url.pathname === '/api/v1/assignments/my' && req.method === 'GET') return send(200, assignments.filter(item => owns(item) && (!url.searchParams.has('status') || item.status === url.searchParams.get('status'))).map(assignmentRead));
       const operation = /^\/api\/v1\/assignments\/([^/]+)\/(publish|archive)$/.exec(url.pathname);
       if (operation && req.method === 'POST') {
