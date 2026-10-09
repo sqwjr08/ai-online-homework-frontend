@@ -39,7 +39,7 @@ JavaScript线上作业系统前端，拥有简单用户系统，用户分为学�
 │   ├── App.vue
 │   ├── assets
 │   │   └── logo.png
-│   ├── components                   
+│   ├── components                  
 
 ## 启动项目
 npm run dev
